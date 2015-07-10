@@ -467,6 +467,22 @@ bool BindingsConfiguration::read(const std::string &file)
 void BindingsConfiguration::generateDefaults()
 {
 	NC::Key::Type k = NC::Key::None;
+	if (notBound(k = stringToKey("h")))
+		bind(k, Actions::Type::PreviousColumn);
+	if (notBound(k = stringToKey("k")))
+		bind(k, Actions::Type::ScrollUp);
+	if (notBound(k = stringToKey("j")))
+		bind(k, Actions::Type::ScrollDown);
+	if (notBound(k = stringToKey("l")))
+		bind(k, Actions::Type::NextColumn);
+	if (notBound(k = stringToKey("ctrl-b")))
+		bind(k, Actions::Type::PageUp);
+	if (notBound(k = stringToKey("ctrl-f")))
+		bind(k, Actions::Type::PageDown);
+	if (notBound(k = stringToKey("ctrl-u")))
+		bind(k, Actions::Type::PageUp);
+	if (notBound(k = stringToKey("ctrl-d")))
+		bind(k, Actions::Type::PageDown);
 	if (notBound(k = stringToKey("mouse")))
 		bind(k, Actions::Type::MouseEvent);
 	if (notBound(k = stringToKey("up")))
@@ -649,7 +665,7 @@ void BindingsConfiguration::generateDefaults()
 		bind(k, Actions::Type::ShowArtistInfo);
 	if (notBound(k = stringToKey("g")))
 		bind(k, Actions::Type::JumpToPositionInSong);
-	if (notBound(k = stringToKey("l")))
+	if (notBound(k = stringToKey("L")))
 		bind(k, Actions::Type::ShowLyrics);
 	if (notBound(k = stringToKey("ctrl-v")))
 		bind(k, Actions::Type::SelectRange);
