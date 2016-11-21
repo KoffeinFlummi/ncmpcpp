@@ -471,9 +471,13 @@ void BindingsConfiguration::generateDefaults()
 		bind(k, Actions::Type::MouseEvent);
 	if (notBound(k = stringToKey("up")))
 		bind(k, Actions::Type::ScrollUp);
+	if (notBound(k = stringToKey("k")))
+		bind(k, Actions::Type::ScrollUp);
 	if (notBound(k = stringToKey("shift-up")))
 		bind(k, Binding::ActionChain({ &Actions::get(Actions::Type::SelectItem), &Actions::get(Actions::Type::ScrollUp) }));
 	if (notBound(k = stringToKey("down")))
+		bind(k, Actions::Type::ScrollDown);
+	if (notBound(k = stringToKey("j")))
 		bind(k, Actions::Type::ScrollDown);
 	if (notBound(k = stringToKey("shift-down")))
 		bind(k, Binding::ActionChain({ &Actions::get(Actions::Type::SelectItem), &Actions::get(Actions::Type::ScrollDown) }));
@@ -487,7 +491,15 @@ void BindingsConfiguration::generateDefaults()
 		bind(k, Actions::Type::ScrollDownArtist);
 	if (notBound(k = stringToKey("page_up")))
 		bind(k, Actions::Type::PageUp);
+	if (notBound(k = stringToKey("ctrl-b")))
+		bind(k, Actions::Type::PageUp);
+	if (notBound(k = stringToKey("ctrl-u")))
+		bind(k, Actions::Type::PageUp);
 	if (notBound(k = stringToKey("page_down")))
+		bind(k, Actions::Type::PageDown);
+	if (notBound(k = stringToKey("ctrl-f")))
+		bind(k, Actions::Type::PageDown);
+	if (notBound(k = stringToKey("ctrl-d")))
 		bind(k, Actions::Type::PageDown);
 	if (notBound(k = stringToKey("home")))
 		bind(k, Actions::Type::MoveHome);
@@ -520,9 +532,21 @@ void BindingsConfiguration::generateDefaults()
 		bind(k, Actions::Type::SlaveScreen);
 		bind(k, Actions::Type::VolumeUp);
 	}
+	if (notBound(k = stringToKey("l")))
+	{
+		bind(k, Actions::Type::NextColumn);
+		bind(k, Actions::Type::SlaveScreen);
+		bind(k, Actions::Type::VolumeUp);
+	}
 	if (notBound(k = stringToKey("+")))
 		bind(k, Actions::Type::VolumeUp);
 	if (notBound(k = stringToKey("left")))
+	{
+		bind(k, Actions::Type::PreviousColumn);
+		bind(k, Actions::Type::MasterScreen);
+		bind(k, Actions::Type::VolumeDown);
+	}
+	if (notBound(k = stringToKey("h")))
 	{
 		bind(k, Actions::Type::PreviousColumn);
 		bind(k, Actions::Type::MasterScreen);
@@ -660,7 +684,7 @@ void BindingsConfiguration::generateDefaults()
 		bind(k, Actions::Type::ShowArtistInfo);
 	if (notBound(k = stringToKey("g")))
 		bind(k, Actions::Type::JumpToPositionInSong);
-	if (notBound(k = stringToKey("l")))
+	if (notBound(k = stringToKey("L")))
 		bind(k, Actions::Type::ShowLyrics);
 	if (notBound(k = stringToKey("ctrl-v")))
 		bind(k, Actions::Type::SelectRange);
@@ -718,7 +742,7 @@ void BindingsConfiguration::generateDefaults()
 		bind(k, Actions::Type::ToggleInterface);
 	if (notBound(k = stringToKey("!")))
 		bind(k, Actions::Type::ToggleSeparatorsBetweenAlbums);
-	if (notBound(k = stringToKey("L")))
+	if (notBound(k = stringToKey("ctrl-L")))
 		bind(k, Actions::Type::ToggleLyricsFetcher);
 	if (notBound(k = stringToKey("F")))
 		bind(k, Actions::Type::ToggleFetchingLyricsInBackground);
