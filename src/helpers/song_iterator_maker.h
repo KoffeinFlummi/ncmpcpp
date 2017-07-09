@@ -1,5 +1,5 @@
 /***************************************************************************
- *   Copyright (C) 2008-2016 by Andrzej Rybczak                            *
+ *   Copyright (C) 2008-2017 by Andrzej Rybczak                            *
  *   electricityispower@gmail.com                                          *
  *                                                                         *
  *   This program is free software; you can redistribute it and/or modify  *
@@ -22,26 +22,48 @@
 #define NCMPCPP_HELPERS_SONG_ITERATOR_MAKER_H
 
 #include <boost/iterator/transform_iterator.hpp>
-#include <boost/iterator/zip_iterator.hpp>
-#include "menu.h"
+#include "curses/menu.h"
 #include "song_list.h"
 
-template <typename ItemT, typename TransformT>
-SongIterator makeSongIterator_(typename NC::Menu<ItemT>::Iterator it, TransformT &&map)
+template <typename SongT>
+struct SongPropertiesExtractor
 {
-	return SongIterator(boost::make_zip_iterator(boost::make_tuple(
-		typename NC::Menu<ItemT>::PropertiesIterator(it),
-		boost::make_transform_iterator(it, std::forward<TransformT>(map))
-	)));
+	template <typename ItemT>
+	auto &operator()(ItemT &item) const
+	{
+		return m_cache.assign(&item.properties(), &item.value());
+	}
+
+private:
+	mutable SongProperties m_cache;
+};
+
+template <typename IteratorT>
+SongIterator makeSongIterator(IteratorT it)
+{
+	typedef SongPropertiesExtractor<
+		typename IteratorT::value_type::Type
+		> Extractor;
+	static_assert(
+		std::is_convertible<
+		  typename std::result_of<Extractor(typename IteratorT::reference)>::type,
+		  SongProperties &
+		>::value, "invalid result type of SongPropertiesExtractor");
+	return SongIterator(boost::make_transform_iterator(it, Extractor{}));
 }
 
-template <typename ItemT, typename TransformT>
-ConstSongIterator makeConstSongIterator_(typename NC::Menu<ItemT>::ConstIterator it, TransformT &&map)
+template <typename ConstIteratorT>
+ConstSongIterator makeConstSongIterator(ConstIteratorT it)
 {
-	return ConstSongIterator(boost::make_zip_iterator(boost::make_tuple(
-		typename NC::Menu<ItemT>::ConstPropertiesIterator(it),
-		boost::make_transform_iterator(it, std::forward<TransformT>(map))
-	)));
+	typedef SongPropertiesExtractor<
+		typename ConstIteratorT::value_type::Type
+		> Extractor;
+	static_assert(
+		std::is_convertible<
+		  typename std::result_of<Extractor(typename ConstIteratorT::reference)>::type,
+		  const SongProperties &
+		>::value, "invalid result type of SongPropertiesExtractor");
+	return ConstSongIterator(boost::make_transform_iterator(it, Extractor{}));
 }
 
 #endif // NCMPCPP_HELPERS_SONG_ITERATOR_MAKER_H

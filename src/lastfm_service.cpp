@@ -1,5 +1,5 @@
 /***************************************************************************
- *   Copyright (C) 2008-2016 by Andrzej Rybczak                            *
+ *   Copyright (C) 2008-2017 by Andrzej Rybczak                            *
  *   electricityispower@gmail.com                                          *
  *                                                                         *
  *   This program is free software; you can redistribute it and/or modify  *
@@ -20,6 +20,7 @@
 
 #include "lastfm_service.h"
 
+#include <boost/algorithm/string/replace.hpp>
 #include <boost/algorithm/string/trim.hpp>
 #include <boost/locale/conversion.hpp>
 #include <fstream>
@@ -52,7 +53,7 @@ Service::Result Service::fetch()
 		url += "=";
 		url += Curl::escape(arg.second);
 	}
-	
+
 	std::string data;
 	CURLcode code = Curl::perform(data, url);
 	
@@ -63,7 +64,7 @@ Service::Result Service::fetch()
 	else
 	{
 		result = processData(data);
-		
+
 		// if relevant part of data was not found and one of arguments
 		// was language, try to fetch it again without that parameter.
 		// otherwise just report failure.
@@ -93,7 +94,7 @@ void ArtistInfo::beautifyOutput(NC::Scrollpad &w)
 {
 	w.setProperties(NC::Format::Bold, "\n\nSimilar artists:\n", NC::Format::NoBold, 0);
 	w.setProperties(NC::Format::Bold, "\n\nSimilar tags:\n", NC::Format::NoBold, 0);
-	w.setProperties(Config.color2, "\n * ", NC::Color::End, 0, boost::regex::literal);
+	w.setProperties(Config.color2, "\n * ", boost::regex::literal);
 }
 
 Service::Result ArtistInfo::processData(const std::string &data)
@@ -117,6 +118,10 @@ Service::Result ArtistInfo::processData(const std::string &data)
 				std::string url = what[1], wiki;
 				// unescape &amp;s
 				unescapeHtmlEntities(url);
+				// fill in language info since url points to english version.
+				const auto &lang = m_arguments["lang"];
+				if (!lang.empty())
+					boost::replace_first(url, "last.fm/music/", "last.fm/" + lang + "/music/");
 				// ...try to get the content of it...
 				CURLcode code = Curl::perform(wiki, url, "", true);
 				
@@ -144,7 +149,10 @@ Service::Result ArtistInfo::processData(const std::string &data)
 			result.second += desc;
 		}
 		else
+		{
 			result.second += "No description available for this artist.";
+			return result;
+		}
 	}
 	else
 	{

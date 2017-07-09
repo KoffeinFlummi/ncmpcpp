@@ -1,5 +1,5 @@
 /***************************************************************************
- *   Copyright (C) 2008-2016 by Andrzej Rybczak                            *
+ *   Copyright (C) 2008-2017 by Andrzej Rybczak                            *
  *   electricityispower@gmail.com                                          *
  *                                                                         *
  *   This program is free software; you can redistribute it and/or modify  *
@@ -23,8 +23,8 @@
 
 #include "interfaces.h"
 #include "mpdpp.h"
-#include "playlist.h"
-#include "screen.h"
+#include "screens/playlist.h"
+#include "screens/screen.h"
 #include "settings.h"
 #include "song_list.h"
 #include "status.h"
@@ -341,22 +341,37 @@ void moveSelectedItemsTo(NC::Menu<MPD::Song> &menu, F &&move_fun)
 }
 
 template <typename F>
-void deleteSelectedSongs(NC::Menu<MPD::Song> &m, F delete_fun)
+void deleteSelectedSongs(NC::Menu<MPD::Song> &menu, F &&delete_fun)
 {
-	selectCurrentIfNoneSelected(m);
-	// ok, this is tricky. we need to operate on whole playlist
-	// to get positions right, but at the same time we need to
-	// ignore all songs that are not filtered. we use the fact
-	// that both ranges share the same values, ie. we can compare
-	// pointers to check whether an item belongs to filtered range.
-	auto begin = ++m.begin();
-	Mpd.StartCommandsList();
-	for (auto it = m.rbegin(); it != m.rend(); ++it)
+	selectCurrentIfNoneSelected(menu);
+	// We need to operate on the whole playlist to get positions right, but at the
+	// same time we need to ignore all songs that are not filtered. We abuse the
+	// fact that both ranges share the same values, i.e. we can compare addresses
+	// of item values to check whether an item belongs to filtered range. TODO: do
+	// something more sane here.
+	NC::Menu<MPD::Song>::Iterator begin;
+	NC::Menu<MPD::Song>::ReverseIterator real_begin, real_end;
 	{
-		if (it->isSelected())
+		ScopedUnfilteredMenu<MPD::Song> sunfilter(ReapplyFilter::No, menu);
+		// obtain iterators for unfiltered range
+		begin = menu.begin() + 1; // cancel reverse iterator's offset
+		real_begin = menu.rbegin();
+		real_end = menu.rend();
+	};
+	// get iterator to filtered range
+	auto cur_filtered = menu.rbegin();
+	Mpd.StartCommandsList();
+	for (auto it = real_begin; it != real_end; ++it)
+	{
+		// current iterator belongs to filtered range, proceed
+		if (&it->value() == &cur_filtered->value())
 		{
-			it->setSelected(false);
-			delete_fun(Mpd, it.base() - begin);
+			if (it->isSelected())
+			{
+				it->setSelected(false);
+				delete_fun(Mpd, it.base() - begin);
+			}
+			++cur_filtered;
 		}
 	}
 	Mpd.CommitCommandsList();
@@ -381,19 +396,6 @@ std::string getSharedDirectory(Iterator first, Iterator last)
 			break;
 	}
 	return result;
-}
-
-template <typename ListT>
-void markSongsInPlaylist(ListT &list)
-{
-	ScopedUnfilteredMenu<typename ListT::Item::Type> sunfilter(ReapplyFilter::No, list);
-	MPD::Song *s;
-	for (auto &p : static_cast<SongList &>(list))
-	{
-		s = p.get<Bit::Song>();
-		if (s != nullptr)
-			p.get<Bit::Properties>().setBold(myPlaylist->checkForSong(*s));
-	}
 }
 
 template <typename Iterator>
@@ -489,12 +491,36 @@ template <typename T> void ShowTime(T &buf, size_t length, bool short_names)
 		buf << length << (short_names ? "s" : (length == 1 ? " second" : " seconds"));
 }
 
-template <typename BufferT> void ShowTag(BufferT &buf, const std::string &tag)
+template <typename BufferT>
+void ShowTag(BufferT &buf, const std::string &tag)
 {
 	if (tag.empty())
-		buf << Config.empty_tags_color << Config.empty_tag << NC::Color::End;
+		buf << Config.empty_tags_color
+		    << Config.empty_tag
+		    << NC::FormattedColor::End<>(Config.empty_tags_color);
 	else
 		buf << tag;
+}
+
+inline NC::Buffer ShowTag(const std::string &tag)
+{
+	NC::Buffer result;
+	ShowTag(result, tag);
+	return result;
+}
+
+template <typename T>
+void setHighlightFixes(NC::Menu<T> &m)
+{
+	m.setHighlightPrefix(Config.current_item_prefix);
+	m.setHighlightSuffix(Config.current_item_suffix);
+}
+
+template <typename T>
+void setHighlightInactiveColumnFixes(NC::Menu<T> &m)
+{
+	m.setHighlightPrefix(Config.current_item_inactive_column_prefix);
+	m.setHighlightSuffix(Config.current_item_inactive_column_suffix);
 }
 
 inline const char *withErrors(bool success)

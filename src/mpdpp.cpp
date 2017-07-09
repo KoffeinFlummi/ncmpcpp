@@ -1,5 +1,5 @@
 /***************************************************************************
- *   Copyright (C) 2008-2016 by Andrzej Rybczak                            *
+ *   Copyright (C) 2008-2017 by Andrzej Rybczak                            *
  *   electricityispower@gmail.com                                          *
  *                                                                         *
  *   This program is free software; you can redistribute it and/or modify  *
@@ -187,6 +187,11 @@ int Connection::noidle()
 		checkErrors();
 	}
 	return flags;
+}
+
+void Connection::setNoidleCallback(NoidleCallback callback)
+{
+	m_noidle_callback = std::move(callback);
 }
 
 Statistics Connection::getStatistics()
@@ -466,6 +471,14 @@ void Connection::SetVolume(unsigned vol)
 	mpd_run_set_volume(m_connection.get(), vol);
 	checkErrors();
 }
+
+void Connection::ChangeVolume(int change)
+{
+	prechecksNoCommandsList();
+	mpd_run_change_volume(m_connection.get(), change);
+	checkErrors();
+}
+
 
 std::string Connection::GetReplayGainMode()
 {
@@ -846,7 +859,9 @@ void Connection::checkConnection() const
 void Connection::prechecks()
 {
 	checkConnection();
-	noidle();
+	int flags = noidle();
+	if (flags && m_noidle_callback)
+		m_noidle_callback(flags);
 }
 
 void Connection::prechecksNoCommandsList()

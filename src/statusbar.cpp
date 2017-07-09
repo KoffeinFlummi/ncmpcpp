@@ -1,5 +1,5 @@
 /***************************************************************************
- *   Copyright (C) 2008-2016 by Andrzej Rybczak                            *
+ *   Copyright (C) 2008-2017 by Andrzej Rybczak                            *
  *   electricityispower@gmail.com                                          *
  *                                                                         *
  *   This program is free software; you can redistribute it and/or modify  *
@@ -23,7 +23,7 @@
 #include "status.h"
 #include "statusbar.h"
 #include "bindings.h"
-#include "playlist.h"
+#include "screens/playlist.h"
 #include "utility/wide_string.h"
 
 using Global::wFooter;
@@ -59,8 +59,6 @@ void Progressbar::draw(unsigned int elapsed, unsigned int time)
 {
 	unsigned pb_width = wFooter->getWidth();
 	unsigned howlong = time ? pb_width*elapsed/time : 0;
-	if (Config.progressbar_boldness)
-		*wFooter << NC::Format::Bold;
 	*wFooter << Config.progressbar_color;
 	if (Config.progressbar[2] != '\0')
 	{
@@ -71,6 +69,7 @@ void Progressbar::draw(unsigned int elapsed, unsigned int time)
 	}
 	else
 		mvwhline(wFooter->raw(), 0, 0, 0, pb_width);
+	*wFooter << NC::FormattedColor::End<>(Config.progressbar_color);
 	if (time)
 	{
 		*wFooter << Config.progressbar_elapsed_color;
@@ -79,11 +78,8 @@ void Progressbar::draw(unsigned int elapsed, unsigned int time)
 			*wFooter << Config.progressbar[0];
 		if (howlong < wFooter->getWidth())
 			*wFooter << Config.progressbar[1];
-		*wFooter << NC::Color::End;
+		*wFooter << NC::FormattedColor::End<>(Config.progressbar_elapsed_color);
 	}
-	*wFooter << NC::Color::End;
-	if (Config.progressbar_boldness)
-		*wFooter << NC::Format::NoBold;
 }
 
 Statusbar::ScopedLock::ScopedLock() noexcept
@@ -199,18 +195,19 @@ bool Statusbar::Helpers::mainHook(const char *)
 	return true;
 }
 
-std::string Statusbar::Helpers::promptReturnOneOf(std::vector<std::string> values)
+char Statusbar::Helpers::promptReturnOneOf(const std::vector<char> &values)
 {
-	Statusbar::Helpers::ImmediatelyReturnOneOf prompt_hook(std::move(values));
-	NC::Window::ScopedPromptHook hook(*wFooter, prompt_hook);
-	int x = wFooter->getX(), y = wFooter->getY();
-	std::string result;
+	if (values.empty())
+		throw std::logic_error("empty vector of acceptable input");
+	NC::Key::Type result;
 	do
 	{
-		wFooter->goToXY(x, y);
-		result = wFooter->prompt();
+		wFooter->refresh();
+		result = wFooter->readKey();
+		if (result == NC::Key::Ctrl_C || result == NC::Key::Ctrl_G)
+			throw NC::PromptAborted();
 	}
-	while (!prompt_hook.isOneOf(result));
+	while (std::find(values.begin(), values.end(), result) == values.end());
 	return result;
 }
 

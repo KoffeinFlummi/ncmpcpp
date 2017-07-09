@@ -1,19 +1,19 @@
-AC_INIT(configure.ac)
+AC_INIT([ncmpcpp], [0.8])
+AC_CONFIG_SRCDIR([configure.ac])
 AC_CONFIG_HEADERS(config.h)
-AM_INIT_AUTOMAKE(ncmpcpp, 0.8_dev)
+AM_INIT_AUTOMAKE([subdir-objects])
 
-m4_include([m4/ax_lib_readline.m4])
+AC_CONFIG_MACRO_DIR([m4])
 
 AC_PREREQ(2.59)
 
 AC_LANG_CPLUSPLUS
 AC_PROG_CXX
-AM_PROG_LIBTOOL
+AC_PROG_LIBTOOL
 
 AC_ARG_ENABLE(outputs, AS_HELP_STRING([--enable-outputs], [Enable outputs screen @<:@default=no@:>@]), [outputs=$enableval], [outputs=no])
 AC_ARG_ENABLE(visualizer, AS_HELP_STRING([--enable-visualizer], [Enable music visualizer screen @<:@default=no@:>@]), [visualizer=$enableval], [visualizer=no])
 AC_ARG_ENABLE(clock, AS_HELP_STRING([--enable-clock], [Enable clock screen @<:@default=no@:>@]), [clock=$enableval], [clock=no])
-AC_ARG_ENABLE(unicode, AS_HELP_STRING([--enable-unicode], [Enable utf8 support @<:@default=yes@:>@]), [unicode=$enableval], [unicode=yes])
 
 AC_ARG_WITH(fftw, AS_HELP_STRING([--with-fftw], [Enable fftw support (required for frequency spectrum vizualization) @<:@default=auto@:>@]), [fftw=$withval], [fftw=auto])
 AC_ARG_WITH(taglib, AS_HELP_STRING([--with-taglib], [Enable tag editor @<:@default=auto@:>@]), [taglib=$withval], [taglib=auto])
@@ -26,9 +26,7 @@ if test "$clock" = "yes"; then
 	AC_DEFINE([ENABLE_CLOCK], [1], [enables clock screen])
 fi
 
-dnl ================================
-dnl = checking for -std=c++14 flag =
-dnl ================================
+# -std=c++14
 AC_MSG_CHECKING([whether compiler supports -std=c++14])
 old_CXXFLAGS="$CXXFLAGS"
 CXXFLAGS="-std=c++14"
@@ -40,9 +38,7 @@ AC_COMPILE_IFELSE([AC_LANG_PROGRAM([[ ]])],
 )
 CXXFLAGS="$old_CXXFLAGS $std_cpp14"
 
-dnl ===================================================
-dnl = checking for generic lambda expressions support =
-dnl ===================================================
+# generic lambda expressions support
 AC_MSG_CHECKING([whether compiler supports generic lambda expressions])
 AC_COMPILE_IFELSE([AC_LANG_PROGRAM([], [[auto f = [](auto n) { return n*n; }; f(7);]])],
 	AC_MSG_RESULT([yes]),
@@ -50,84 +46,61 @@ AC_COMPILE_IFELSE([AC_LANG_PROGRAM([], [[auto f = [](auto n) { return n*n; }; f(
 		AC_MSG_ERROR([[Your compiler doesn't seem to support generic lambda expressions, please upgrade (GCC >= 5)]])
 )
 
-dnl =============================
-dnl = setting boost environment =
-dnl =============================
-AS_IF([test -z "${BOOST_LIB_SUFFIX+x}"], [BOOST_LIB_SUFFIX=])
-AC_ARG_VAR([BOOST_LIB_SUFFIX], [Boost library name suffix [default=]])
+# boost
+BOOST_REQUIRE([1.60])
+AC_SUBST(BOOST_CPPFLAGS)
+CPPFLAGS="$CPPFLAGS $BOOST_CPPFLAGS"
 
-dnl ======================================
-dnl = checking for various boost headers =
-dnl ======================================
-AC_CHECK_HEADERS([boost/bind.hpp], ,
-	AC_MSG_ERROR(boost/bind.hpp is missing))
-AC_CHECK_HEADERS([boost/lexical_cast.hpp], ,
-	AC_MSG_ERROR(boost/lexical_cast.hpp is missing))
-AC_CHECK_HEADERS([boost/algorithm/string.hpp], ,
-	AC_MSG_ERROR(boost/algorithm/string.hpp is missing))
+BOOST_STRING_ALGO
+BOOST_FORMAT
+BOOST_HASH
+BOOST_CONVERSION
+BOOST_MATH
+BOOST_OPTIONAL
+BOOST_RANGE
+BOOST_TOKENIZER
+BOOST_TUPLE
+BOOST_VARIANT
 
-dnl =================================
-dnl = checking for boost.filesystem =
-dnl =================================
-AC_CHECK_HEADERS([boost/filesystem.hpp], ,
-	AC_MSG_ERROR(boost/filesystem.hpp is missing)
-)
-AC_CHECK_LIB(boost_filesystem$BOOST_LIB_SUFFIX, main, LIBS="$LIBS -lboost_filesystem$BOOST_LIB_SUFFIX",
-	AC_MSG_ERROR([no boost.filesystem library found])
-)
-AC_CHECK_LIB(boost_system$BOOST_LIB_SUFFIX, main, LIBS="$LIBS -lboost_system$BOOST_LIB_SUFFIX",
-	AC_MSG_ERROR([no boost.system library found])
-)
+BOOST_DATE_TIME
+AC_SUBST(BOOST_DATE_TIME_LDFLAGS)
+AC_SUBST(BOOST_DATE_TIME_LIBS)
+LDFLAGS="$LDFLAGS $BOOST_DATE_TIME_LDFLAGS"
+LIBS="$LIBS $BOOST_DATE_TIME_LIBS"
 
-dnl =============================
-dnl = checking for boost.format =
-dnl =============================
-AC_CHECK_HEADERS([boost/format.hpp], ,
-	AC_MSG_ERROR(boost/format.hpp is missing)
-)
+BOOST_FILESYSTEM
+AC_SUBST(BOOST_FILESYSTEM_LDFLAGS)
+AC_SUBST(BOOST_FILESYSTEM_LIBS)
+LDFLAGS="$LDFLAGS $BOOST_FILESYSTEM_LDFLAGS"
+LIBS="$LIBS $BOOST_FILESYSTEM_LIBS"
 
-dnl =============================
-dnl = checking for boost.locale =
-dnl =============================
-AC_CHECK_HEADERS([boost/locale.hpp], ,
-	AC_MSG_ERROR(boost/locale.hpp is missing)
-)
-AC_CHECK_LIB(boost_locale$BOOST_LIB_SUFFIX, main, LIBS="$LIBS -lboost_locale$BOOST_LIB_SUFFIX",
-	AC_MSG_ERROR([no boost.locale library found])
-)
+BOOST_LOCALE
+AC_SUBST(BOOST_LOCALE_LDFLAGS)
+AC_SUBST(BOOST_LOCALE_LIBS)
+LDFLAGS="$LDFLAGS $BOOST_LOCALE_LDFLAGS"
+LIBS="$LIBS $BOOST_LOCALE_LIBS"
 
-dnl =================================
-dnl = checking for boost.posix_time =
-dnl =================================
-AC_CHECK_HEADERS([boost/date_time/posix_time/posix_time.hpp], ,
-	AC_MSG_ERROR(boost/date_time/posix_time/posix_time.hpp is missing)
-)
+BOOST_PROGRAM_OPTIONS
+AC_SUBST(BOOST_PROGRAM_OPTIONS_LDFLAGS)
+AC_SUBST(BOOST_PROGRAM_OPTIONS_LIBS)
+LDFLAGS="$LDFLAGS $BOOST_PROGRAM_OPTIONS_LDFLAGS"
+LIBS="$LIBS $BOOST_PROGRAM_OPTIONS_LIBS"
 
-dnl ======================================
-dnl = checking for boost.program_options =
-dnl ======================================
-AC_CHECK_HEADERS([boost/program_options.hpp], ,
-	AC_MSG_ERROR(boost/program_options.hpp is missing)
-)
-AC_CHECK_LIB(boost_program_options$BOOST_LIB_SUFFIX, main, LIBS="$LIBS -lboost_program_options$BOOST_LIB_SUFFIX",
-	AC_MSG_ERROR([no boost.program_options library found])
-)
+BOOST_REGEX
+AC_SUBST(BOOST_REGEX_LDFLAGS)
+AC_SUBST(BOOST_REGEX_LIBS)
+LDFLAGS="$LDFLAGS $BOOST_REGEX_LDFLAGS"
+LIBS="$LIBS $BOOST_REGEX_LIBS"
 
-dnl ============================
-dnl = checking for boost.regex =
-dnl ============================
-AC_CHECK_HEADERS([boost/regex.hpp], ,
-	AC_MSG_ERROR(boost/regex.hpp is missing)
-)
-AC_CHECK_LIB(boost_regex$BOOST_LIB_SUFFIX, main, LIBS="$LIBS -lboost_regex$BOOST_LIB_SUFFIX",
-	AC_MSG_ERROR([no boost.regex library found])
-)
+BOOST_THREAD
+AC_SUBST(BOOST_THREAD_LDFLAGS)
+AC_SUBST(BOOST_THREAD_LIBS)
+LDFLAGS+="$LDFLAGS $BOOST_THREAD_LDFLAGS"
+LIBS="$LIBS $BOOST_THREAD_LIBS"
 
-dnl ====================
-dnl = checking for icu =
-dnl ====================
+# icu
 AH_TEMPLATE([BOOST_REGEX_ICU], [boost.regex was compiled with ICU support])
-PKG_CHECK_MODULES([ICU], [icu-uc], [
+PKG_CHECK_MODULES([ICU], [icu-i18n icu-uc], [
 	old_CPPFLAGS="$CPPFLAGS"
 	old_LIBS="$LIBS"
 	AC_SUBST(ICU_CFLAGS)
@@ -135,7 +108,9 @@ PKG_CHECK_MODULES([ICU], [icu-uc], [
 	CPPFLAGS="$CPPFLAGS $ICU_CFLAGS"
 	LIBS="$LIBS $ICU_LIBS"
 	AC_MSG_CHECKING([whether boost.regex was compiled with ICU support])
-	AC_LINK_IFELSE([AC_LANG_PROGRAM([[#include <boost/regex/icu.hpp>]], [[boost::u32regex rx = boost::make_u32regex("foo"); if (boost::u32regex_search("foobar", rx)) { }]])],
+	AC_LINK_IFELSE([AC_LANG_PROGRAM([
+    #include <boost/regex/icu.hpp>
+    ], [boost::u32regex rx = boost::make_u32regex("foo"); if (boost::u32regex_search("foobar", rx)) { }])],
 	AC_MSG_RESULT([yes])
 		AC_DEFINE([BOOST_REGEX_ICU], [1]),
 	AC_MSG_RESULT([no])
@@ -144,15 +119,11 @@ PKG_CHECK_MODULES([ICU], [icu-uc], [
 	)
 ], [[]])
 
-dnl ================================
-dnl = checking for various headers =
-dnl ================================
+# various headers
 AC_CHECK_HEADERS([netinet/tcp.h netinet/in.h], , AC_MSG_ERROR(vital headers missing))
 AC_CHECK_HEADERS([langinfo.h], , AC_MSG_WARN(locale detection disabled))
 
-dnl ==============================
-dnl = checking for libmpdclient2 =
-dnl ==============================
+# libmpdclient2
 PKG_CHECK_MODULES([libmpdclient], [libmpdclient >= 2.8], [
 	AC_SUBST(libmpdclient_CFLAGS)
 	AC_SUBST(libmpdclient_LIBS)
@@ -166,9 +137,7 @@ PKG_CHECK_MODULES([libmpdclient], [libmpdclient >= 2.8], [
 	AC_MSG_ERROR([libmpdclient >= 2.8 is required!])
 )
 
-dnl =========================
-dnl = checking for readline =
-dnl =========================
+# readline
 AX_LIB_READLINE
 if test "$ax_cv_lib_readline" = "no"; then
   AC_MSG_ERROR([no readline compatible library found])
@@ -177,45 +146,35 @@ if test "$ax_cv_lib_readline_history" = "no"; then
   AC_MSG_WARN([readline library has no history functionality])
 fi
 
-dnl ========================
-dnl = checking for pthread =
-dnl ========================
+# pthread
 AC_CHECK_LIB(pthread, pthread_create, LIBS="$LIBS -lpthread",
 	AC_MSG_ERROR([pthread library is required])
 )
 
-dnl ========================
-dnl = checking for ncurses =
-dnl ========================
-if test "$unicode" = "yes" ; then
-	curses_config_bin="ncursesw6-config ncursesw5-config"
-	AC_DEFINE([NCMPCPP_UNICODE], [1], [enables unicode support])
-else
-	curses_config_bin="ncurses6-config ncurses5-config"
-fi
-
-AC_PATH_PROGS(CURSES_CONFIG, $curses_config_bin)
-if test "$CURSES_CONFIG" != "" ; then
-	CPPFLAGS="$CPPFLAGS `$CURSES_CONFIG --cflags`"
-	LIBS="$LIBS `$CURSES_CONFIG --libs`"
-fi
-AC_CHECK_LIB(ncursesw, initscr,
-	curses_lib=ncursesw,
-	curses_lib=ncurses
+# ncursesw
+PKG_CHECK_MODULES([ncursesw], [ncursesw], [
+	AC_SUBST(ncursesw_CFLAGS)
+	AC_SUBST(ncursesw_LIBS)
+	CPPFLAGS="$CPPFLAGS $ncursesw_CFLAGS"
+	AC_CHECK_HEADERS([curses.h],
+		LIBS="$LIBS $ncursesw_LIBS"
+	,
+		AC_MSG_ERROR([missing curses.h header])
+	)
+  AC_CHECK_LIB(ncursesw, initscr, , AC_MSG_ERROR([ncursesw doesn't provide initscr]))
+  AC_MSG_CHECKING([whether curses.h exposes wide-char functions by default])
+  AC_LINK_IFELSE([AC_LANG_PROGRAM([
+    #include <curses.h>
+    ], [waddnwstr(stdscr, L"123", 3)])],
+	AC_MSG_RESULT([yes]),
+	AC_MSG_RESULT([no])
+		CPPFLAGS="$CPPFLAGS -D_XOPEN_SOURCE_EXTENDED",
+	)
+],
+	AC_MSG_ERROR([ncursesw is required!])
 )
 
-AC_CHECK_LIB($curses_lib, initscr,
-	if test "$CURSES_CONFIG" = "" ; then
-		LIBS="$LIBS -l$curses_lib"
-	fi
-	,
-	AC_MSG_ERROR([$curses_lib library is required])
-	)
-AC_CHECK_HEADERS([curses.h], , AC_MSG_ERROR([missing curses.h header]))
-
-dnl ======================
-dnl = checking for fftw3 =
-dnl ======================
+# fftw3
 if test "$visualizer" = "yes" ; then
 	if test "$fftw" != "no" ; then
 		PKG_CHECK_MODULES([fftw3], [fftw3 >= 3], [
@@ -238,9 +197,7 @@ if test "$visualizer" = "yes" ; then
 	AC_DEFINE([ENABLE_VISUALIZER], [1], [enables music visualizer screen])
 fi
 
-dnl ========================
-dnl = checking for libcurl =
-dnl ========================
+# libcurl
 PKG_CHECK_MODULES([libcurl], [libcurl], [
 	AC_SUBST(libcurl_CFLAGS)
 	AC_SUBST(libcurl_LIBS)
@@ -254,9 +211,7 @@ PKG_CHECK_MODULES([libcurl], [libcurl], [
 	AC_MSG_ERROR([libcurl is required!])
 )
 
-dnl =======================
-dnl = checking for taglib =
-dnl =======================
+# taglib
 if test "$taglib" != "no" ; then
 	AC_PATH_PROG(TAGLIB_CONFIG, taglib-config)
 	if test "$TAGLIB_CONFIG" != "" ; then

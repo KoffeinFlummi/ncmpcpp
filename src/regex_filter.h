@@ -1,5 +1,5 @@
 /***************************************************************************
- *   Copyright (C) 2008-2016 by Andrzej Rybczak                            *
+ *   Copyright (C) 2008-2017 by Andrzej Rybczak                            *
  *   electricityispower@gmail.com                                          *
  *                                                                         *
  *   This program is free software; you can redistribute it and/or modify  *
@@ -25,12 +25,47 @@
 
 #ifdef BOOST_REGEX_ICU
 # include <boost/regex/icu.hpp>
+# include <unicode/errorcode.h>
+# include <unicode/translit.h>
 #else
 # include <boost/regex.hpp>
 #endif // BOOST_REGEX_ICU
 
 #include <cassert>
 #include <iostream>
+
+#include "utility/functional.h"
+
+namespace {
+
+#ifdef BOOST_REGEX_ICU
+
+struct StripDiacritics
+{
+	static void convert(UnicodeString &s)
+	{
+		if (m_converter == nullptr)
+		{
+			ErrorCode result;
+			m_converter = Transliterator::createInstance(
+				"NFD; [:M:] Remove; NFC", UTRANS_FORWARD, result);
+			if (result.isFailure())
+				throw std::runtime_error(
+					"instantiation of transliterator instance failed with "
+					+ std::string(result.errorName()));
+		}
+		m_converter->transliterate(s);
+	}
+
+private:
+	static Transliterator *m_converter;
+};
+
+Transliterator *StripDiacritics::m_converter;
+
+#endif // BOOST_REGEX_ICU
+
+}
 
 namespace Regex {
 
@@ -43,31 +78,44 @@ typedef
 Regex;
 
 template <typename StringT>
-inline Regex make(StringT &&s, boost::regex_constants::syntax_option_type flags)
+inline Regex make(StringT &&s,
+                  boost::regex_constants::syntax_option_type flags)
 {
 	return
-#	ifdef BOOST_REGEX_ICU
+#ifdef BOOST_REGEX_ICU
 	boost::make_u32regex
-#	else
+#else
 	boost::regex
-#	endif // BOOST_REGEX_ICU
+#endif // BOOST_REGEX_ICU
 	(std::forward<StringT>(s), flags);
 }
 
-template <typename StringT>
-inline bool search(StringT &&s, const Regex &rx)
+template <typename CharT>
+inline bool search(const std::basic_string<CharT> &s,
+                   const Regex &rx,
+                   bool ignore_diacritics)
 {
 	try {
-		return
-#		ifdef BOOST_REGEX_ICU
-		boost::u32regex_search
-#		else
-		boost::regex_search
-#		endif // BOOST_REGEX_ICU
-		(std::forward<StringT>(s), rx);
+#ifdef BOOST_REGEX_ICU
+		if (ignore_diacritics)
+		{
+			auto us = UnicodeString::fromUTF8(
+				StringPiece(convertString<char, CharT>::apply(s)));
+			StripDiacritics::convert(us);
+			return boost::u32regex_search(us, rx);
+		}
+		else
+			return boost::u32regex_search(s, rx);
+#else
+		return boost::regex_search(s, rx);
+#endif // BOOST_REGEX_ICU
 	} catch (std::out_of_range &e) {
 		// Invalid UTF-8 sequence, ignore the string.
-		std::cerr << "Regex::search: error while processing \"" << s << "\": " << e.what() << "\n";
+		std::cerr << "Regex::search: error while processing \""
+		          << s
+		          << "\": "
+		          << e.what()
+		          << "\n";
 		return false;
 	}
 }
@@ -82,11 +130,11 @@ struct Filter
 	Filter() { }
 
 	template <typename FilterT>
-	Filter(const std::string &constraint,
+	Filter(const std::string &constraint_,
 	       boost::regex_constants::syntax_option_type flags,
 	       FilterT &&filter)
-		: m_rx(make(constraint, flags))
-		, m_constraint(constraint)
+		: m_rx(make(constraint_, flags))
+		, m_constraint(constraint_)
 		, m_filter(std::forward<FilterT>(filter))
 	{ }
 
@@ -124,11 +172,11 @@ template <typename T> struct ItemFilter
 	ItemFilter() { }
 
 	template <typename FilterT>
-	ItemFilter(const std::string &constraint,
+	ItemFilter(const std::string &constraint_,
 	           boost::regex_constants::syntax_option_type flags,
 	           FilterT &&filter)
-		: m_rx(make(constraint, flags))
-		, m_constraint(constraint)
+		: m_rx(make(constraint_, flags))
+		, m_constraint(constraint_)
 		, m_filter(std::forward<FilterT>(filter))
 	{ }
 	

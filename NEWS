@@ -1,4 +1,4 @@
-ncmpcpp-0.8 (????-??-??)
+ncmpcpp-0.8 (2017-05-21)
 * Configuration variable 'execute_on_player_state_change' was added.
 * Support for controlling whether ncmpcpp should display multiple tags as-is or make an effort to hide duplicate values (show_duplicate_tags configuration variable, enabled by default).
 * Support for filtering of lists was brought back from the dead.
@@ -10,6 +10,30 @@ ncmpcpp-0.8 (????-??-??)
 * Lyrics can now be fetched for songs with no tags.
 * libcurl dependency is no longer optional.
 * When an attempt to write tags fails, show detailed error message.
+* Support for fetching lyrics for selected items in background was added.
+* Application will now exit if stdin is closed.
+* Configuration variable 'visualizer_sample_multiplier' was deprecated and will be removed in 0.9.
+* Wide character version of ncurses is now required.
+* Added 'statusbar_time_color' and 'player_state_color' configuration variables for further customization of statusbar.
+* Setting foreground color only now preserves current background color.
+* Format information can now be attached to selected color variables in the configuration file. Because of that variable 'progressbar_boldness' is now deprecated in favor of extended 'progressbar_color' and 'progressbar_elapsed_color' (for more information see example configuration file).
+* Lyrics and last_fm can now be startup screens and are lockable.
+* Action 'update_environment' now also synchronizes status with MPD.
+* Fixed an issue that could cause some MPD events to be missed.
+* Action 'jump_to_playing_song' is not runnable now if there is no playing song.
+* Fixed fetching artist info in language other than English.
+* Added test that checks if lyrics fetchers work (available via command line parameter --test-lyrics-fetchers).
+* Fixed fetching lyrics from justsomelyrics.com.
+* Added support for fetching lyrics from jah-lyrics.com and plyrics.com.
+* Seek immediately after invoking appropriate action once.
+* Added support for locating current song in playlist editor.
+* Disable autocenter mode while searching and filtering.
+* Added '--quiet' comand line argument that supresses messages shown at startup.
+* Multiple songs in Media library are now added to playlist in the same order they are displayed.
+* Added configuration option 'media_library_albums_split_by_date' that determines whether albums in media library should be split by date.
+* Added configuration option 'ignore_diacritics' that allows for ignoring diacritics while searching (boost compiled with ICU support is required).
+* Added support for reading multiple bindings files (the ones in ~/.ncmpcpp/bindings and $XDG_CONFIG_HOME/ncmpcpp/bindings are read by default).
+* 'main_window_highlight_color' and 'active_column_color' configuration options are now deprecated in favor of 'current_item_prefix'/'current_item_suffix' and 'current_item_inactive_column_prefix'/'current_item_inactive_column_suffix' (note that now highlight of inactive column is customizable instead of the active one in presence of multiple columns).
 
 ncmpcpp-0.7.7 (2016-10-31)
 * Fixed compilation on 32bit platforms.

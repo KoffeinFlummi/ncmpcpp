@@ -1,5 +1,5 @@
 /***************************************************************************
- *   Copyright (C) 2008-2016 by Andrzej Rybczak                            *
+ *   Copyright (C) 2008-2017 by Andrzej Rybczak                            *
  *   electricityispower@gmail.com                                          *
  *                                                                         *
  *   This program is free software; you can redistribute it and/or modify  *
@@ -34,6 +34,8 @@
 #ifdef HAVE_LANGINFO_H
 # include <langinfo.h>
 #endif
+
+namespace ph = std::placeholders;
 
 Configuration Config;
 
@@ -177,19 +179,88 @@ NC::Buffer buffer(const std::string &v)
 	return result;
 }
 
-/*
-void deprecated(const char *option, double version_removal)
+NC::Buffer buffer_wlength(const NC::Buffer *target,
+                          size_t &wlength,
+                          const std::string &v)
 {
-	std::cerr << "WARNING: " << option
-	          << " is deprecated and will be removed in " << version_removal << "\n";
+	// Compatibility layer between highlight color and new highlight prefix and
+	// suffix. Basically, for older configurations if highlight color is provided,
+	// we don't want to override it with default prefix and suffix.
+	if (target == nullptr || target->empty())
+	{
+		NC::Buffer result = buffer(v);
+		wlength = wideLength(ToWString(result.str()));
+		return result;
+	}
+	else
+		return *target;
 }
-*/
+
+void deprecated(const char *option, double version_removal, const std::string &advice)
+{
+	std::cerr << "WARNING: Variable '" << option
+	          << "' is deprecated and will be removed in "
+	          << version_removal;
+	if (!advice.empty())
+		std::cerr << " (" << advice << ")";
+	std::cerr << ".\n";
+}
 
 }
 
 bool Configuration::read(const std::vector<std::string> &config_paths, bool ignore_errors)
 {
 	option_parser p;
+
+	// Deprecated options.
+	p.add<void>("visualizer_sample_multiplier", nullptr, "", [](std::string v) {
+			if (!v.empty())
+				deprecated(
+					"visualizer_sample_multiplier",
+					0.9,
+					"visualizer scales automatically");
+		});
+	p.add<void>("progressbar_boldness", nullptr, "", [](std::string v) {
+			if (!v.empty())
+				deprecated(
+					"progressbar_boldness",
+					0.9,
+					"use extended progressbar_color and progressbar_elapsed_color instead");
+		});
+
+	p.add<void>("main_window_highlight_color", nullptr, "", [this](std::string v) {
+			if (!v.empty())
+			{
+				const std::string current_item_prefix_str = "$(" + v + ")$r";
+				const std::string current_item_suffix_str = "$/r$(end)";
+				current_item_prefix = buffer_wlength(
+					nullptr,
+					current_item_prefix_length,
+					current_item_prefix_str);
+				current_item_suffix = buffer_wlength(
+					nullptr,
+					current_item_suffix_length,
+					current_item_suffix_str);
+				deprecated(
+					"main_window_highlight_color",
+					0.9,
+					"set current_item_prefix = \""
+					+ current_item_prefix_str
+					+ "\" and current_item_suffix = \""
+					+ current_item_suffix_str
+					+ "\" to preserve current behavior");
+			};
+		});
+	p.add<void>("active_column_color", nullptr, "", [this](std::string v) {
+			if (!v.empty())
+			{
+				deprecated(
+					"active_column_color",
+					0.9,
+					"replaced by current_item_inactive_column_prefix"
+					" and current_item_inactive_column_suffix");
+			};
+		});
 
 	// keep the same order of variables as in configuration file
 	p.add("ncmpcpp_directory", &ncmpcpp_directory, "~/.ncmpcpp/", adjust_directory);
@@ -207,12 +278,6 @@ bool Configuration::read(const std::vector<std::string> &config_paths, bool igno
 	p.add("visualizer_fifo_path", &visualizer_fifo_path, "/tmp/mpd.fifo", adjust_path);
 	p.add("visualizer_output_name", &visualizer_output_name, "Visualizer feed");
 	p.add("visualizer_in_stereo", &visualizer_in_stereo, "yes", yes_no);
-	p.add("visualizer_sample_multiplier", &visualizer_sample_multiplier, "1",
-	      [](std::string v) {
-		      double multiplier = verbose_lexical_cast<double>(v);
-		      lowerBoundCheck(multiplier, 0.0);
-		      return multiplier;
-	      });
 	p.add("visualizer_sync_interval", &visualizer_sync_interval, "30",
 	      [](std::string v) {
 		      unsigned sync_interval = verbose_lexical_cast<unsigned>(v);
@@ -226,7 +291,7 @@ bool Configuration::read(const std::vector<std::string> &config_paths, bool igno
 			return result;
 	});
 	p.add("visualizer_color", &visualizer_colors,
-	      "blue, cyan, green, yellow, magenta, red", list_of<NC::Color>);
+	      "blue, cyan, green, yellow, magenta, red", list_of<NC::FormattedColor>);
 	p.add("system_encoding", &system_encoding, "", [](std::string encoding) {
 #ifdef HAVE_LANGINFO_H
 			// try to autodetect system encoding
@@ -269,31 +334,49 @@ bool Configuration::read(const std::vector<std::string> &config_paths, bool igno
 		      return Format::parse(ToWString(std::move(v)),
 		                           Format::Flags::All ^ Format::Flags::OutputSwitch);
 	});
-	p.add("now_playing_prefix", &now_playing_prefix,
-	      "$b", [this](std::string v) {
-		      NC::Buffer result = buffer(v);
-		      now_playing_prefix_length = wideLength(ToWString(result.str()));
-		      return result;
-	});
-	p.add("now_playing_suffix", &now_playing_suffix,
-	      "$/b", [this](std::string v) {
-		      NC::Buffer result = buffer(v);
-		      now_playing_suffix_length = wideLength(ToWString(result.str()));
-		      return result;
-	});
+	p.add("current_item_prefix", &current_item_prefix, "$(yellow)$r",
+	      std::bind(buffer_wlength,
+	                &current_item_prefix,
+	                std::ref(current_item_prefix_length),
+	                ph::_1));
+	p.add("current_item_suffix", &current_item_suffix, "$/r$(end)",
+	      std::bind(buffer_wlength,
+	                &current_item_suffix,
+	                std::ref(current_item_suffix_length),
+	                ph::_1));
+	p.add("current_item_inactive_column_prefix", &current_item_inactive_column_prefix,
+	      "$(white)$r",
+	      std::bind(buffer_wlength,
+	                &current_item_inactive_column_prefix,
+	                std::ref(current_item_inactive_column_prefix_length),
+	                ph::_1));
+	p.add("current_item_inactive_column_suffix", &current_item_inactive_column_suffix,
+	      "$/r$(end)",
+	      std::bind(buffer_wlength,
+	                &current_item_inactive_column_suffix,
+	                std::ref(current_item_inactive_column_suffix_length),
+	                ph::_1));
+	p.add("now_playing_prefix", &now_playing_prefix, "$b",
+	      std::bind(buffer_wlength,
+	                nullptr,
+	                std::ref(now_playing_prefix_length),
+	                ph::_1));
+	p.add("now_playing_suffix", &now_playing_suffix, "$/b",
+	      std::bind(buffer_wlength,
+	                nullptr,
+	                std::ref(now_playing_suffix_length),
+	                ph::_1));
 	p.add("browser_playlist_prefix", &browser_playlist_prefix, "$2playlist$9 ", buffer);
-	p.add("selected_item_prefix", &selected_item_prefix,
-	      "$6", [this](std::string v) {
-		      NC::Buffer result = buffer(v);
-		      selected_item_prefix_length = wideLength(ToWString(result.str()));
-		      return result;
-	      });
-	p.add("selected_item_suffix", &selected_item_suffix,
-	      "$9", [this](std::string v) {
-		      NC::Buffer result = buffer(v);
-		      selected_item_suffix_length = wideLength(ToWString(result.str()));
-		      return result;
-	      });
+	p.add("selected_item_prefix", &selected_item_prefix, "$6",
+	      std::bind(buffer_wlength,
+	                nullptr,
+	                std::ref(selected_item_prefix_length),
+	                ph::_1));
+	p.add("selected_item_suffix", &selected_item_suffix, "$9",
+	      std::bind(buffer_wlength,
+	                nullptr,
+	                std::ref(selected_item_suffix_length),
+	                ph::_1));
 	p.add("modified_item_prefix", &modified_item_prefix, "$3>$9 ", buffer);
 	p.add("song_window_title_format", &song_window_title_format,
 	      "{%a - }{%t}|{%f}", [](std::string v) {
@@ -336,7 +419,6 @@ bool Configuration::read(const std::vector<std::string> &config_paths, bool igno
 			result.resize(3);
 			return result;
 	});
-	p.add("progressbar_boldness", &progressbar_boldness, "yes", yes_no);
 	p.add("default_place_to_search_in", &search_in_db, "database", [](std::string v) {
 			if (v == "database")
 				return true;
@@ -363,6 +445,7 @@ bool Configuration::read(const std::vector<std::string> &config_paths, bool igno
 			else
 				invalid_value(v);
 		});
+	p.add("media_library_albums_split_by_date", &media_library_albums_split_by_date, "yes", yes_no);
 	p.add("default_find_mode", &wrapped_search, "wrapped", [](std::string v) {
 			if (v == "wrapped")
 				return true;
@@ -379,7 +462,7 @@ bool Configuration::read(const std::vector<std::string> &config_paths, bool igno
 	p.add("cyclic_scrolling", &use_cyclic_scrolling, "no", yes_no);
 	p.add("lines_scrolled", &lines_scrolled, "2");
 	p.add("lyrics_fetchers", &lyrics_fetchers,
-	      "lyricwiki, azlyrics, genius, sing365, lyricsmania, metrolyrics, justsomelyrics, tekstowo, internet",
+	      "lyricwiki, azlyrics, genius, sing365, lyricsmania, metrolyrics, justsomelyrics, jahlyrics, plyrics, tekstowo, internet",
 	      list_of<LyricsFetcher_>);
 	p.add("follow_now_playing_lyrics", &now_playing_lyrics, "no", yes_no);
 	p.add("fetch_lyrics_for_current_song_in_background", &fetch_lyrics_in_background,
@@ -436,7 +519,7 @@ bool Configuration::read(const std::vector<std::string> &config_paths, bool igno
 	      "yes", yes_no);
 	p.add("ask_before_clearing_playlists", &ask_before_clearing_playlists,
 	      "yes", yes_no);
-	p.add("ask_before_shuffling_playlists", &ask_before_clearing_playlists,
+	p.add("ask_before_shuffling_playlists", &ask_before_shuffling_playlists,
 	      "yes", yes_no);
 	p.add("clock_display_seconds", &clock_display_seconds, "no", yes_no);
 	p.add("display_volume_level", &display_volume_level, "yes", yes_no);
@@ -455,6 +538,7 @@ bool Configuration::read(const std::vector<std::string> &config_paths, bool igno
 				invalid_value(v);
 	});
 	p.add("ignore_leading_the", &ignore_leading_the, "no", yes_no);
+	p.add("ignore_diacritics", &ignore_diacritics, "no", yes_no);
 	p.add("block_search_constraints_change_if_items_found",
 	      &block_search_constraints_change, "yes", yes_no);
 	p.add("mouse_support", &mouse_support, "yes", yes_no);
@@ -490,16 +574,16 @@ bool Configuration::read(const std::vector<std::string> &config_paths, bool igno
 	p.add("header_window_color", &header_color, "default");
 	p.add("volume_color", &volume_color, "default");
 	p.add("state_line_color", &state_line_color, "default");
-	p.add("state_flags_color", &state_flags_color, "default");
+	p.add("state_flags_color", &state_flags_color, "default:b");
 	p.add("main_window_color", &main_color, "yellow");
 	p.add("color1", &color1, "white");
 	p.add("color2", &color2, "green");
-	p.add("main_window_highlight_color", &main_highlight_color, "yellow");
-	p.add("progressbar_color", &progressbar_color, "black");
-	p.add("progressbar_elapsed_color", &progressbar_elapsed_color, "green");
+	p.add("progressbar_color", &progressbar_color, "black:b");
+	p.add("progressbar_elapsed_color", &progressbar_elapsed_color, "green:b");
 	p.add("statusbar_color", &statusbar_color, "default");
-	p.add("alternative_ui_separator_color", &alternative_ui_separator_color, "black");
-	p.add("active_column_color", &active_column_color, "red");
+	p.add("statusbar_time_color", &statusbar_time_color, "default:b");
+	p.add("player_state_color", &player_state_color, "default:b");
+	p.add("alternative_ui_separator_color", &alternative_ui_separator_color, "black:b");
 	p.add("window_border_color", &window_border, "green", verbose_lexical_cast<NC::Color>);
 	p.add("active_window_border", &active_window_border, "red",
 	      verbose_lexical_cast<NC::Color>);

@@ -1,5 +1,5 @@
 /***************************************************************************
- *   Copyright (C) 2008-2016 by Andrzej Rybczak                            *
+ *   Copyright (C) 2008-2017 by Andrzej Rybczak                            *
  *   electricityispower@gmail.com                                          *
  *                                                                         *
  *   This program is free software; you can redistribute it and/or modify  *
@@ -260,6 +260,23 @@ struct Item
 	{
 		return m_type;
 	}
+
+	Directory &directory()
+	{
+		return const_cast<Directory &>(
+			static_cast<const Item &>(*this).directory());
+	}
+	Song &song()
+	{
+		return const_cast<Song &>(
+			static_cast<const Item &>(*this).song());
+	}
+	Playlist &playlist()
+	{
+		return const_cast<Playlist &>(
+			static_cast<const Item &>(*this).playlist());
+	}
+
 	const Directory &directory() const
 	{
 		assert(m_type == Type::Directory);
@@ -463,6 +480,8 @@ typedef Iterator<std::string> StringIterator;
 
 struct Connection
 {
+	typedef std::function<void(int)> NoidleCallback;
+
 	Connection();
 	
 	void Connect();
@@ -517,7 +536,8 @@ struct Connection
 	void SetConsume(bool);
 	void SetCrossfade(unsigned);
 	void SetVolume(unsigned int vol);
-	
+	void ChangeVolume(int change);
+
 	std::string GetReplayGainMode();
 	void SetReplayGainMode(ReplayGainMode);
 	
@@ -565,6 +585,7 @@ struct Connection
 	
 	void idle();
 	int noidle();
+	void setNoidleCallback(NoidleCallback callback);
 	
 private:
 	struct ConnectionDeleter {
@@ -578,6 +599,7 @@ private:
 	void prechecksNoCommandsList();
 	void checkErrors() const;
 
+	NoidleCallback m_noidle_callback;
 	std::unique_ptr<mpd_connection, ConnectionDeleter> m_connection;
 	bool m_command_list_active;
 	

@@ -1,5 +1,5 @@
 /***************************************************************************
- *   Copyright (C) 2008-2016 by Andrzej Rybczak                            *
+ *   Copyright (C) 2008-2017 by Andrzej Rybczak                            *
  *   electricityispower@gmail.com                                          *
  *                                                                         *
  *   This program is free software; you can redistribute it and/or modify  *
@@ -26,7 +26,7 @@
 #include <map>
 #include <string>
 
-#include "scrollpad.h"
+#include "curses/scrollpad.h"
 
 namespace LastFm {
 
@@ -36,7 +36,7 @@ struct Service
 	typedef std::pair<bool, std::string> Result;
 	
 	Service(Arguments args) : m_arguments(args) { }
-	
+
 	virtual const char *name() = 0;
 	virtual Result fetch();
 	

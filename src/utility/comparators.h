@@ -1,5 +1,5 @@
 /***************************************************************************
- *   Copyright (C) 2008-2016 by Andrzej Rybczak                            *
+ *   Copyright (C) 2008-2017 by Andrzej Rybczak                            *
  *   electricityispower@gmail.com                                          *
  *                                                                         *
  *   This program is free software; you can redistribute it and/or modify  *
@@ -87,7 +87,9 @@ public:
 	
 	bool operator()(const MPD::Item &a, const MPD::Item &b) const;
 	
-	bool operator()(const NC::Menu<MPD::Item>::Item &a, const NC::Menu<MPD::Item>::Item &b) const {
+	bool operator()(const NC::Menu<MPD::Item>::Item &a,
+	                const NC::Menu<MPD::Item>::Item &b) const
+	{
 		return (*this)(a.value(), b.value());
 	}
 };

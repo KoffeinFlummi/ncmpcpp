@@ -1,5 +1,5 @@
 /***************************************************************************
- *   Copyright (C) 2008-2016 by Andrzej Rybczak                            *
+ *   Copyright (C) 2008-2017 by Andrzej Rybczak                            *
  *   electricityispower@gmail.com                                          *
  *                                                                         *
  *   This program is free software; you can redistribute it and/or modify  *
@@ -23,7 +23,7 @@
 
 #include <cassert>
 #include "actions.h"
-#include "screen_type.h"
+#include "screens/screen_type.h"
 
 namespace Actions {
 
@@ -40,13 +40,13 @@ private:
 
 struct RequireRunnable: BaseAction
 {
-	RequireRunnable(BaseAction *action);
+	RequireRunnable(std::shared_ptr<BaseAction> action);
 	
 private:
 	virtual bool canBeRun() override;
 	virtual void run() override { }
 	
-	BaseAction *m_action;
+	std::shared_ptr<BaseAction> m_action;
 };
 
 struct RequireScreen: BaseAction
@@ -62,7 +62,7 @@ private:
 
 struct RunExternalCommand: BaseAction
 {
-	RunExternalCommand(std::string command);
+	RunExternalCommand(std::string &&command);
 	
 private:
 	virtual void run() override;

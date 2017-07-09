@@ -1,5 +1,5 @@
 /***************************************************************************
- *   Copyright (C) 2008-2016 by Andrzej Rybczak                            *
+ *   Copyright (C) 2008-2017 by Andrzej Rybczak                            *
  *   electricityispower@gmail.com                                          *
  *                                                                         *
  *   This program is free software; you can redistribute it and/or modify  *
@@ -19,11 +19,13 @@
  ***************************************************************************/
 
 #include <algorithm>
+#include <boost/range/adaptor/reversed.hpp>
 #include <time.h>
 
 #include "enums.h"
 #include "helpers.h"
-#include "playlist.h"
+#include "format_impl.h"
+#include "screens/playlist.h"
 #include "statusbar.h"
 #include "utility/functional.h"
 
@@ -35,7 +37,7 @@ const MPD::Song *currentSong(const BaseScreen *screen)
 	{
 		const auto it = list->currentS();
 		if (it != list->endS())
-			ptr = it->get<Bit::Song>();
+			ptr = it->song();
 	}
 	return ptr;
 }
@@ -60,13 +62,24 @@ MPD::SongIterator getDatabaseIterator(MPD::Connection &mpd)
 		else
 			throw;
 	}
+	catch (MPD::ServerError &e)
+	{
+		// mopidy blacklists 'listallinfo' command by default and throws server
+		// error when it receives it. Work around that to prevent ncmpcpp from
+		// continuously retrying to send the command and looping.
+		if (strstr(e.what(), "listallinfo") != nullptr
+		    && strstr(e.what(), "disabled") != nullptr)
+			Statusbar::print("Unable to fetch the data, server refused to process 'listallinfo' command");
+		else
+			throw;
+	}
 	return result;
 }
 
 void removeSongFromPlaylist(const SongMenu &playlist, const MPD::Song &s)
 {
 	Mpd.StartCommandsList();
-	for (auto &item : reverse_iteration(playlist))
+	for (auto &item : boost::adaptors::reverse(playlist))
 		if (item.value() == s)
 			Mpd.Delete(item.value().getPosition());
 	Mpd.CommitCommandsList();

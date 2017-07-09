@@ -1,5 +1,5 @@
 /***************************************************************************
- *   Copyright (C) 2008-2016 by Andrzej Rybczak                            *
+ *   Copyright (C) 2008-2017 by Andrzej Rybczak                            *
  *   electricityispower@gmail.com                                          *
  *                                                                         *
  *   This program is free software; you can redistribute it and/or modify  *
@@ -46,9 +46,9 @@ void PushCharacters::run()
 		(*m_window)->pushChar(*it);
 }
 
-RequireRunnable::RequireRunnable(BaseAction *action)
+RequireRunnable::RequireRunnable(std::shared_ptr<BaseAction> action)
 	: BaseAction(Type::MacroUtility, "require_runnable")
-	, m_action(action)
+	, m_action(std::move(action))
 {
 	assert(m_action != nullptr);
 	m_name += " \"";
@@ -75,7 +75,7 @@ bool RequireScreen::canBeRun()
 	return Global::myScreen->type() == m_screen_type;
 }
 
-RunExternalCommand::RunExternalCommand(std::string command)
+RunExternalCommand::RunExternalCommand(std::string &&command)
 	: BaseAction(Type::MacroUtility, "run_external_command")
 	, m_command(std::move(command))
 {

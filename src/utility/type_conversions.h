@@ -1,5 +1,5 @@
 /***************************************************************************
- *   Copyright (C) 2008-2016 by Andrzej Rybczak                            *
+ *   Copyright (C) 2008-2017 by Andrzej Rybczak                            *
  *   electricityispower@gmail.com                                          *
  *                                                                         *
  *   This program is free software; you can redistribute it and/or modify  *
@@ -21,10 +21,14 @@
 #ifndef NCMPCPP_UTILITY_TYPE_CONVERSIONS_H
 #define NCMPCPP_UTILITY_TYPE_CONVERSIONS_H
 
+#include <boost/optional.hpp>
+
+#include "curses/window.h"
 #include "mpdpp.h"
 #include "mutable_song.h"
-#include "window.h"
 #include "enums.h"
+
+std::string channelsToString(int channels);
 
 NC::Color charToColor(char c);
 
@@ -33,6 +37,8 @@ MPD::MutableSong::SetFunction tagTypeToSetFunction(mpd_tag_type tag);
 
 mpd_tag_type charToTagType(char c);
 MPD::Song::GetFunction charToGetFunction(char c);
+
+boost::optional<mpd_tag_type> getFunctionToTagType(MPD::Song::GetFunction f);
 
 std::string itemTypeToString(MPD::Item::Type type);
 

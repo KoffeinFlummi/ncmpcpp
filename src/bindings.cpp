@@ -1,5 +1,5 @@
 /***************************************************************************
- *   Copyright (C) 2008-2016 by Andrzej Rybczak                            *
+ *   Copyright (C) 2008-2017 by Andrzej Rybczak                            *
  *   electricityispower@gmail.com                                          *
  *                                                                         *
  *   This program is free software; you can redistribute it and/or modify  *
@@ -40,10 +40,8 @@ NC::Key::Type stringToKey(const std::string &s);
 NC::Key::Type stringToSpecialKey(const std::string &s)
 {
 	NC::Key::Type result = NC::Key::None;
-	if (!s.compare(0, 4, "ctrl") && s.length() == 6 && (s[4] == '_' || s[4] == '-'))
+	if (!s.compare(0, 4, "ctrl") && s.length() == 6 && s[4] == '-')
 	{
-		if (s[4] == '_')
-			warning("prefix 'ctrl_' is deprecated and will be removed in 0.8, use 'ctrl-' instead.");
 		if (s[5] >= 'a' && s[5] <= 'z')
 			result = NC::Key::Ctrl_A + (s[5] - 'a');
 		else if (s[5] == '[')
@@ -57,22 +55,16 @@ NC::Key::Type stringToSpecialKey(const std::string &s)
 		else if (s[5] == '_')
 			result = NC::Key::Ctrl_Underscore;
 	}
-	else if (!s.compare(0, 3, "alt") && s.length() > 3 && (s[3] == '_' || s[3] == '-'))
+	else if (!s.compare(0, 3, "alt") && s.length() > 3 && s[3] == '-')
 	{
-		if (s[3] == '_')
-			warning("prefix 'alt_' is deprecated and will be removed in 0.8, use 'alt-' instead.");
 		result = NC::Key::Alt | stringToKey(s.substr(4));
 	}
-	else if (!s.compare(0, 4, "ctrl") && s.length() > 4 && (s[4] == '_' || s[4] == '-'))
+	else if (!s.compare(0, 4, "ctrl") && s.length() > 4 && s[4] == '-')
 	{
-		if (s[4] == '_')
-			warning("prefix 'ctrl_' is deprecated and will be removed in 0.8, use 'ctrl-' instead.");
 		result = NC::Key::Ctrl | stringToKey(s.substr(5));
 	}
-	else if (!s.compare(0, 5, "shift") && s.length() > 5 && (s[5] == '_' || s[5] == '-'))
+	else if (!s.compare(0, 5, "shift") && s.length() > 5 && s[5] == '-')
 	{
-		if (s[5] == '_')
-			warning("prefix 'shift_' is deprecated and will be removed in 0.8, use 'shift-' instead.");
 		result = NC::Key::Shift | stringToKey(s.substr(6));
 	}
 	else if (!s.compare("escape"))
@@ -113,11 +105,6 @@ NC::Key::Type stringToSpecialKey(const std::string &s)
 	}
 	else if (!s.compare("backspace"))
 		result = NC::Key::Backspace;
-	else if (!s.compare("backspace_2"))
-	{
-		warning("'backspace_2' is deprecated and will be removed in 0.8, use 'backspace' instead.");
-		result = NC::Key::Backspace;
-	}
 	return result;
 }
 
@@ -134,13 +121,22 @@ NC::Key::Type stringToKey(const std::string &s)
 }
 
 template <typename F>
-Actions::BaseAction *parseActionLine(const std::string &line, F error)
+std::shared_ptr<Actions::BaseAction> parseActionLine(const std::string &line, F error)
 {
-	Actions::BaseAction *result = 0;
+	std::shared_ptr<Actions::BaseAction> result;
 	size_t i = 0;
 	for (; i < line.size() && !isspace(line[i]); ++i) { }
 	if (i == line.size()) // only action name
-		result = Actions::get(line);
+	{
+		if (line == "set_visualizer_sample_multiplier")
+		{
+			warning("action 'set_visualizer_sample_multiplier' is deprecated"
+			        " and will be removed in 0.9");
+			result = Actions::get_(Actions::Type::Dummy);
+		}
+		else
+			result = Actions::get_(line);
+	}
 	else // there is something else
 	{
 		std::string action_name = line.substr(0, i);
@@ -149,9 +145,11 @@ Actions::BaseAction *parseActionLine(const std::string &line, F error)
 			// push single character into input queue
 			std::string arg = getEnclosedString(line, '"', '"', 0);
 			NC::Key::Type k = stringToSpecialKey(arg);
-			auto queue = std::vector<NC::Key::Type>{ k };
 			if (k != NC::Key::None)
-				result = new Actions::PushCharacters(&Global::wFooter, std::move(queue));
+				result = std::static_pointer_cast<Actions::BaseAction>(
+					std::make_shared<Actions::PushCharacters>(
+						&Global::wFooter,
+						std::vector<NC::Key::Type>{k}));
 			else
 				error() << "invalid character passed to push_character: '" << arg << "'\n";
 		}
@@ -161,11 +159,13 @@ Actions::BaseAction *parseActionLine(const std::string &line, F error)
 			std::string arg = getEnclosedString(line, '"', '"', 0);
 			if (!arg.empty())
 			{
-				std::vector<NC::Key::Type> queue(arg.begin(), arg.end());
 				// if char is signed, erase 1s from char -> int conversion
 				for (auto it = arg.begin(); it != arg.end(); ++it)
 					*it &= 0xff;
-				result = new Actions::PushCharacters(&Global::wFooter, std::move(queue));
+				result = std::static_pointer_cast<Actions::BaseAction>(
+					std::make_shared<Actions::PushCharacters>(
+						&Global::wFooter,
+						std::vector<NC::Key::Type>{arg.begin(), arg.end()}));
 			}
 			else
 				error() << "empty argument passed to push_characters\n";
@@ -176,7 +176,8 @@ Actions::BaseAction *parseActionLine(const std::string &line, F error)
 			std::string arg = getEnclosedString(line, '"', '"', 0);
 			ScreenType screen_type = stringToScreenType(arg);
 			if (screen_type != ScreenType::Unknown)
-				result = new Actions::RequireScreen(screen_type);
+				result = std::static_pointer_cast<Actions::BaseAction>(
+					std::make_shared<Actions::RequireScreen>(screen_type));
 			else
 				error() << "unknown screen passed to require_screen: '" << arg << "'\n";
 		}
@@ -184,9 +185,10 @@ Actions::BaseAction *parseActionLine(const std::string &line, F error)
 		{
 			// require that given action is runnable
 			std::string arg = getEnclosedString(line, '"', '"', 0);
-			auto action = Actions::get(arg);
+			auto action = Actions::get_(arg);
 			if (action)
-				result = new Actions::RequireRunnable(action);
+				result = std::static_pointer_cast<Actions::BaseAction>(
+					std::make_shared<Actions::RequireRunnable>(action));
 			else
 				error() << "unknown action passed to require_runnable: '" << arg << "'\n";
 		}
@@ -194,7 +196,8 @@ Actions::BaseAction *parseActionLine(const std::string &line, F error)
 		{
 			std::string command = getEnclosedString(line, '"', '"', 0);
 			if (!command.empty())
-				result = new Actions::RunExternalCommand(std::move(command));
+				result = std::static_pointer_cast<Actions::BaseAction>(
+					std::make_shared<Actions::RunExternalCommand>(std::move(command)));
 			else
 				error() << "empty command passed to run_external_command\n";
 		}
@@ -464,9 +467,21 @@ bool BindingsConfiguration::read(const std::string &file)
 	return result;
 }
 
+bool BindingsConfiguration::read(const std::vector<std::string> &binding_paths)
+{
+	return std::all_of(
+		binding_paths.begin(),
+		binding_paths.end(),
+		[&](const std::string &binding_path) {
+			return read(binding_path);
+		}
+	);
+}
+
 void BindingsConfiguration::generateDefaults()
 {
 	NC::Key::Type k = NC::Key::None;
+	bind(NC::Key::EoF, Actions::Type::Quit);
 	if (notBound(k = stringToKey("mouse")))
 		bind(k, Actions::Type::MouseEvent);
 	if (notBound(k = stringToKey("up")))
@@ -474,13 +489,13 @@ void BindingsConfiguration::generateDefaults()
 	if (notBound(k = stringToKey("k")))
 		bind(k, Actions::Type::ScrollUp);
 	if (notBound(k = stringToKey("shift-up")))
-		bind(k, Binding::ActionChain({ &Actions::get(Actions::Type::SelectItem), &Actions::get(Actions::Type::ScrollUp) }));
+		bind(k, Binding::ActionChain({Actions::get_(Actions::Type::SelectItem), Actions::get_(Actions::Type::ScrollUp)}));
 	if (notBound(k = stringToKey("down")))
 		bind(k, Actions::Type::ScrollDown);
 	if (notBound(k = stringToKey("j")))
 		bind(k, Actions::Type::ScrollDown);
 	if (notBound(k = stringToKey("shift-down")))
-		bind(k, Binding::ActionChain({ &Actions::get(Actions::Type::SelectItem), &Actions::get(Actions::Type::ScrollDown) }));
+		bind(k, Binding::ActionChain({Actions::get_(Actions::Type::SelectItem), Actions::get_(Actions::Type::ScrollDown)}));
 	if (notBound(k = stringToKey("[")))
 		bind(k, Actions::Type::ScrollUpAlbum);
 	if (notBound(k = stringToKey("]")))
@@ -710,7 +725,6 @@ void BindingsConfiguration::generateDefaults()
 	{
 		bind(k, Actions::Type::MoveSortOrderUp);
 		bind(k, Actions::Type::MoveSelectedItemsUp);
-		bind(k, Actions::Type::SetVisualizerSampleMultiplier);
 	}
 	if (notBound(k = stringToKey("n")))
 	{
@@ -745,6 +759,8 @@ void BindingsConfiguration::generateDefaults()
 	if (notBound(k = stringToKey("ctrl-L")))
 		bind(k, Actions::Type::ToggleLyricsFetcher);
 	if (notBound(k = stringToKey("F")))
+		bind(k, Actions::Type::FetchLyricsInBackground);
+	if (notBound(k = stringToKey("alt-l")))
 		bind(k, Actions::Type::ToggleFetchingLyricsInBackground);
 	if (notBound(k = stringToKey("ctrl-l")))
 		bind(k, Actions::Type::ToggleScreenLock);
@@ -758,9 +774,6 @@ void BindingsConfiguration::generateDefaults()
 		bind(k, Actions::Type::SetSelectedItemsPriority);
 	if (notBound(k = stringToKey("q")))
 		bind(k, Actions::Type::Quit);
-	
-	if (notBound(k = stringToKey("-")))
-		bind(k, Actions::Type::VolumeDown);
 }
 
 const Command *BindingsConfiguration::findCommand(const std::string &name)

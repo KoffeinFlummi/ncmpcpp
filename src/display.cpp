@@ -1,5 +1,5 @@
 /***************************************************************************
- *   Copyright (C) 2008-2016 by Andrzej Rybczak                            *
+ *   Copyright (C) 2008-2017 by Andrzej Rybczak                            *
  *   electricityispower@gmail.com                                          *
  *                                                                         *
  *   This program is free software; you can redistribute it and/or modify  *
@@ -20,16 +20,16 @@
 
 #include <cassert>
 
-#include "browser.h"
+#include "curses/menu_impl.h"
+#include "screens/browser.h"
 #include "charset.h"
 #include "display.h"
 #include "format_impl.h"
 #include "helpers.h"
-#include "menu_impl.h"
-#include "song_info.h"
-#include "playlist.h"
+#include "screens/song_info.h"
+#include "screens/playlist.h"
 #include "global.h"
-#include "tag_editor.h"
+#include "screens/tag_editor.h"
 #include "utility/string.h"
 #include "utility/type_conversions.h"
 
@@ -78,7 +78,8 @@ const wchar_t *toColumnName(char c)
 
 template <typename T>
 void setProperties(NC::Menu<T> &menu, const MPD::Song &s, const SongList &list,
-	bool &separate_albums, bool &is_now_playing, bool &is_selected, bool &discard_colors)
+                   bool &separate_albums, bool &is_now_playing, bool &is_selected,
+                   bool &is_in_playlist, bool &discard_colors)
 {
 	size_t drawn_pos = menu.drawn() - menu.begin();
 	separate_albums = false;
@@ -87,8 +88,7 @@ void setProperties(NC::Menu<T> &menu, const MPD::Song &s, const SongList &list,
 		auto next = list.beginS() + drawn_pos + 1;
 		if (next != list.endS())
 		{
-			auto next_s = next->get<Bit::Song>();
-			if (next_s != nullptr && next_s->getAlbum() != s.getAlbum())
+			if (next->song() != nullptr && next->song()->getAlbum() != s.getAlbum())
 				separate_albums = true;
 		}
 	}
@@ -98,22 +98,42 @@ void setProperties(NC::Menu<T> &menu, const MPD::Song &s, const SongList &list,
 		mvwhline(menu.raw(), menu.getY(), 0, NC::Key::Space, menu.getWidth());
 	}
 
-	is_selected = menu.drawn()->isSelected();
-	discard_colors = Config.discard_colors_if_item_is_selected && is_selected;
-
 	int song_pos = s.getPosition();
 	is_now_playing = Status::State::player() != MPD::psStop
 		&& myPlaylist->isActiveWindow(menu)
 		&& song_pos == Status::State::currentSongPosition();
 	if (is_now_playing)
 		menu << Config.now_playing_prefix;
+
+	is_in_playlist = !myPlaylist->isActiveWindow(menu)
+		&& myPlaylist->checkForSong(s);
+	if (is_in_playlist)
+		menu << NC::Format::Bold;
+
+	is_selected = menu.drawn()->isSelected();
+	discard_colors = Config.discard_colors_if_item_is_selected && is_selected;
+}
+
+template <typename T>
+void unsetProperties(NC::Menu<T> &menu, bool separate_albums, bool is_now_playing,
+                     bool is_in_playlist)
+{
+	if (is_in_playlist)
+		menu << NC::Format::NoBold;
+
+	if (is_now_playing)
+		menu << Config.now_playing_suffix;
+
+	if (separate_albums)
+		menu << NC::Format::NoUnderline;
 }
 
 template <typename T>
 void showSongs(NC::Menu<T> &menu, const MPD::Song &s, const SongList &list, const Format::AST<char> &ast)
 {
-	bool separate_albums, is_now_playing, is_selected, discard_colors;
-	setProperties(menu, s, list, separate_albums, is_now_playing, is_selected, discard_colors);
+	bool separate_albums, is_now_playing, is_selected, is_in_playlist, discard_colors;
+	setProperties(menu, s, list, separate_albums, is_now_playing, is_selected,
+	              is_in_playlist, discard_colors);
 
 	const size_t y = menu.getY();
 	NC::Buffer right_aligned;
@@ -123,6 +143,13 @@ void showSongs(NC::Menu<T> &menu, const MPD::Song &s, const SongList &list, cons
 	if (!right_aligned.str().empty())
 	{
 		size_t x_off = menu.getWidth() - wideLength(ToWString(right_aligned.str()));
+		if (menu.isHighlighted() && list.currentS()->song() == &s)
+		{
+			if (menu.highlightSuffix() == Config.current_item_suffix)
+				x_off -= Config.current_item_suffix_length;
+			else
+				x_off -= Config.current_item_inactive_column_suffix_length;
+		}
 		if (is_now_playing)
 			x_off -= Config.now_playing_suffix_length;
 		if (is_selected)
@@ -130,10 +157,7 @@ void showSongs(NC::Menu<T> &menu, const MPD::Song &s, const SongList &list, cons
 		menu << NC::TermManip::ClearToEOL << NC::XY(x_off, y) << right_aligned;
 	}
 
-	if (is_now_playing)
-		menu << Config.now_playing_suffix;
-	if (separate_albums)
-		menu << NC::Format::NoUnderline;
+	unsetProperties(menu, separate_albums, is_now_playing, is_in_playlist);
 }
 
 template <typename T>
@@ -142,12 +166,38 @@ void showSongsInColumns(NC::Menu<T> &menu, const MPD::Song &s, const SongList &l
 	if (Config.columns.empty())
 		return;
 
-	bool separate_albums, is_now_playing, is_selected, discard_colors;
-	setProperties(menu, s, list, separate_albums, is_now_playing, is_selected, discard_colors);
+	bool separate_albums, is_now_playing, is_selected, is_in_playlist, discard_colors;
+	setProperties(menu, s, list, separate_albums, is_now_playing, is_selected,
+	              is_in_playlist, discard_colors);
+
+	int menu_width = menu.getWidth();
+	if (menu.isHighlighted() && list.currentS()->song() == &s)
+	{
+		if (menu.highlightPrefix() == Config.current_item_prefix)
+			menu_width -= Config.current_item_prefix_length;
+		else
+			menu_width -= Config.current_item_inactive_column_prefix_length;
+
+		if (menu.highlightSuffix() == Config.current_item_suffix)
+			menu_width -= Config.current_item_suffix_length;
+		else
+			menu_width -= Config.current_item_inactive_column_suffix_length;
+	}
+	if (is_now_playing)
+	{
+		menu_width -= Config.now_playing_prefix_length;
+		menu_width -= Config.now_playing_suffix_length;
+	}
+	if (is_selected)
+	{
+		menu_width -= Config.selected_item_prefix_length;
+		menu_width -= Config.selected_item_suffix_length;
+	}
 
 	int width;
 	int y = menu.getY();
-	int remained_width = menu.getWidth();
+	int remained_width = menu_width;
+
 	std::vector<Column>::const_iterator it, last = Config.columns.end() - 1;
 	for (it = Config.columns.begin(); it != Config.columns.end(); ++it)
 	{
@@ -158,7 +208,7 @@ void showSongsInColumns(NC::Menu<T> &menu, const MPD::Song &s, const SongList &l
 		if (it->stretch_limit >= 0) // (*)
 			width = remained_width - it->stretch_limit;
 		else
-			width = it->fixed ? it->width : it->width * menu.getWidth() * 0.01;
+			width = it->fixed ? it->width : it->width * menu_width * 0.01;
 		// columns with relative width may shrink to 0, omit them
 		if (width == 0)
 			continue;
@@ -166,30 +216,6 @@ void showSongsInColumns(NC::Menu<T> &menu, const MPD::Song &s, const SongList &l
 		// and next column, so we substract it now and restore later.
 		if (it != last)
 			--width;
-
-		if (it == Config.columns.begin() && (is_now_playing || is_selected))
-		{
-			// here comes the shitty part. if we applied now playing or selected
-			// prefix, first column's width needs to be properly modified, so
-			// next column is not affected by them. if prefixes fit, we just
-			// subtract their width from allowed column's width. if they don't,
-			// then we pretend that they do, but we adjust current cursor position
-			// so part of them will be overwritten by next column.
-			int offset = 0;
-			if (is_now_playing)
-				offset += Config.now_playing_prefix_length;
-			if (is_selected)
-				offset += Config.selected_item_prefix_length;
-			if (width-offset < 0)
-			{
-				remained_width -= width + 1;
-				menu.goToXY(width, y);
-				menu << ' ';
-				continue;
-			}
-			width -= offset;
-			remained_width -= offset;
-		}
 
 		// if column doesn't fit into screen, discard it and any other after it.
 		if (remained_width-width < 0 || width < 0 /* this one may come from (*) */)
@@ -232,23 +258,7 @@ void showSongsInColumns(NC::Menu<T> &menu, const MPD::Song &s, const SongList &l
 			menu << NC::Color::End;
 	}
 
-	// here comes the shitty part, second chapter. here we apply
-	// now playing suffix or/and make room for selected suffix
-	// (as it will be applied in Menu::Refresh when this function
-	// returns there).
-	if (is_now_playing)
-	{
-		int np_x = menu.getWidth() - Config.now_playing_suffix_length;
-		if (is_selected)
-			np_x -= Config.selected_item_suffix_length;
-		menu.goToXY(np_x, y);
-		menu << Config.now_playing_suffix;
-	}
-	if (is_selected)
-		menu.goToXY(menu.getWidth() - Config.selected_item_suffix_length, y);
-
-	if (separate_albums)
-		menu << NC::Format::NoUnderline;
+	unsetProperties(menu, separate_albums, is_now_playing, is_in_playlist);
 }
 
 }
@@ -350,7 +360,9 @@ void Display::Tags(NC::Menu<MPD::MutableSong> &menu)
 			menu << Charset::utf8ToLocale(s.getName());
 		else
 			menu << Charset::utf8ToLocale(s.getName())
-			     << Config.color2 << " -> " << NC::Color::End
+			     << Config.color2
+			     << " -> "
+			     << NC::FormattedColor::End<>(Config.color2)
 			     << Charset::utf8ToLocale(s.getNewName());
 	}
 }

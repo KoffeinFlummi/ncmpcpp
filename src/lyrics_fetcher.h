@@ -1,5 +1,5 @@
 /***************************************************************************
- *   Copyright (C) 2008-2016 by Andrzej Rybczak                            *
+ *   Copyright (C) 2008-2017 by Andrzej Rybczak                            *
  *   electricityispower@gmail.com                                          *
  *                                                                         *
  *   This program is free software; you can redistribute it and/or modify  *
@@ -29,7 +29,9 @@
 struct LyricsFetcher
 {
 	typedef std::pair<bool, std::string> Result;
-	
+
+	virtual ~LyricsFetcher() { }
+
 	virtual const char *name() const = 0;
 	virtual Result fetch(const std::string &artist, const std::string &title);
 	
@@ -104,7 +106,7 @@ struct Sing365Fetcher : public GoogleLyricsFetcher
 	virtual const char *name() const override { return "sing365.com"; }
 	
 protected:
-	virtual const char *regex() const override { return "<!-Lyrics Begin->(.*?)<!-Lyrics End->"; }
+	virtual const char *regex() const override { return "<div class=\"content\">.*?</script>(.*?)<script>"; }
 };
 
 struct JustSomeLyricsFetcher : public GoogleLyricsFetcher
@@ -112,7 +114,7 @@ struct JustSomeLyricsFetcher : public GoogleLyricsFetcher
 	virtual const char *name() const override { return "justsomelyrics.com"; }
 	
 protected:
-	virtual const char *regex() const override { return "<div class=\"content.*?</div>\\s*</div>(.*?)<div"; }
+	virtual const char *regex() const override { return "<div class=\"content.*?</div>(.*?)See also"; }
 };
 
 struct AzLyricsFetcher : public GoogleLyricsFetcher
@@ -128,7 +130,23 @@ struct GeniusFetcher : public GoogleLyricsFetcher
 	virtual const char *name() const override { return "genius.com"; }
 
 protected:
-	virtual const char *regex() const override { return "<lyrics.*?>(.*?)</lyrics>"; }
+	virtual const char *regex() const override { return "<div class=\"lyrics\">(.*?)</div>"; }
+};
+
+struct JahLyricsFetcher : public GoogleLyricsFetcher
+{
+	virtual const char *name() const override { return "jah-lyrics.com"; }
+
+protected:
+	virtual const char *regex() const override { return "<div class=\"song-header\">.*?</div>(.*?)<p class=\"disclaimer\">"; }
+};
+
+struct PLyricsFetcher : public GoogleLyricsFetcher
+{
+	virtual const char *name() const override { return "plyrics.com"; }
+
+protected:
+	virtual const char *regex() const override { return "<!-- start of lyrics -->(.*?)<!-- end of lyrics -->"; }
 };
 
 struct TekstowoFetcher : public GoogleLyricsFetcher
@@ -145,7 +163,7 @@ struct InternetLyricsFetcher : public GoogleLyricsFetcher
 	virtual Result fetch(const std::string &artist, const std::string &title) override;
 	
 protected:
-	virtual const char *siteKeyword() const override { return "lyrics"; }
+	virtual const char *siteKeyword() const override { return nullptr; }
 	virtual const char *regex() const override { return ""; }
 	
 	virtual bool isURLOk(const std::string &url) override;

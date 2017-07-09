@@ -1,5 +1,5 @@
 /***************************************************************************
- *   Copyright (C) 2008-2016 by Andrzej Rybczak                            *
+ *   Copyright (C) 2008-2017 by Andrzej Rybczak                            *
  *   electricityispower@gmail.com                                          *
  *                                                                         *
  *   This program is free software; you can redistribute it and/or modify  *
@@ -43,20 +43,28 @@ void drawHeader()
 	switch (Config.design)
 	{
 		case Design::Classic:
-			*wHeader << NC::XY(0, 0) << NC::TermManip::ClearToEOL << NC::Format::Bold << myScreen->title() << NC::Format::NoBold;
-			*wHeader << Config.volume_color;
-			*wHeader << NC::XY(wHeader->getWidth()-VolumeState.length(), 0) << VolumeState;
-			*wHeader << NC::Color::End;
+			*wHeader << NC::XY(0, 0)
+			         << NC::TermManip::ClearToEOL
+			         << NC::Format::Bold
+			         << myScreen->title()
+			         << NC::Format::NoBold
+			         << NC::XY(wHeader->getWidth()-VolumeState.length(), 0)
+			         << Config.volume_color
+			         << VolumeState
+			         << NC::FormattedColor::End<>(Config.volume_color);
 			break;
 		case Design::Alternative:
 			std::wstring title = myScreen->title();
-			*wHeader << NC::XY(0, 3) << NC::TermManip::ClearToEOL;
-			*wHeader << NC::Format::Bold << Config.alternative_ui_separator_color;
+			*wHeader << NC::XY(0, 3)
+			         << NC::TermManip::ClearToEOL
+			         << Config.alternative_ui_separator_color;
 			mvwhline(wHeader->raw(), 2, 0, 0, COLS);
 			mvwhline(wHeader->raw(), 4, 0, 0, COLS);
-			*wHeader << NC::XY((COLS-wideLength(title))/2, 3);
-			*wHeader << Config.header_color << title << NC::Color::End;
-			*wHeader << NC::Color::End << NC::Format::NoBold;
+			*wHeader << NC::FormattedColor::End<>(Config.alternative_ui_separator_color)
+			         << NC::XY((COLS-wideLength(title))/2, 3)
+			         << NC::Format::Bold
+			         << title
+			         << NC::Format::NoBold;
 			break;
 	}
 	wHeader->refresh();

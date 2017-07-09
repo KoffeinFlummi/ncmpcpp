@@ -1,5 +1,5 @@
 /***************************************************************************
- *   Copyright (C) 2008-2016 by Andrzej Rybczak                            *
+ *   Copyright (C) 2008-2017 by Andrzej Rybczak                            *
  *   electricityispower@gmail.com                                          *
  *                                                                         *
  *   This program is free software; you can redistribute it and/or modify  *
@@ -25,8 +25,8 @@
 #include <boost/format.hpp>
 #include <map>
 #include <string>
+#include "curses/window.h"
 #include "interfaces.h"
-#include "window.h"
 
 // forward declarations
 struct SongList;
@@ -35,7 +35,7 @@ namespace Actions {
 
 enum class Type
 {
-	MacroUtility = 0,
+	MacroUtility = -1,
 	Dummy,
 	UpdateEnvironment,
 	MouseEvent,
@@ -137,11 +137,11 @@ enum class Type
 	ToggleBrowserSortMode,
 	ToggleLibraryTagType,
 	ToggleMediaLibrarySortMode,
+	FetchLyricsInBackground,
 	RefetchLyrics,
 	SetSelectedItemsPriority,
 	ToggleOutput,
 	ToggleVisualizationType,
-	SetVisualizerSampleMultiplier,
 	ShowSongInfo,
 	ShowArtistInfo,
 	ShowLyrics,
@@ -189,7 +189,9 @@ extern size_t FooterStartY;
 struct BaseAction
 {
 	BaseAction(Type type_, const char *name_): m_name(name_), m_type(type_) { }
-	
+
+	virtual ~BaseAction() { }
+
 	const std::string &name() const { return m_name; }
 	Type type() const { return m_type; }
 	
@@ -215,7 +217,9 @@ private:
 };
 
 BaseAction &get(Type at);
-BaseAction *get(const std::string &name);
+
+std::shared_ptr<BaseAction> get_(Type at);
+std::shared_ptr<BaseAction> get_(const std::string &name);
 
 struct Dummy: BaseAction
 {
@@ -229,7 +233,7 @@ struct UpdateEnvironment: BaseAction
 {
 	UpdateEnvironment();
 
-	void run(bool update_status, bool refresh_window);
+	void run(bool update_status, bool refresh_window, bool mpd_sync);
 
 private:
 	boost::posix_time::ptime m_past;
@@ -278,7 +282,7 @@ private:
 	virtual void run() override;
 
 	NC::List *m_list;
-	SongList *m_songs;
+	const SongList *m_songs;
 };
 
 struct ScrollUpAlbum: BaseAction
@@ -290,7 +294,7 @@ private:
 	virtual void run() override;
 
 	NC::List *m_list;
-	SongList *m_songs;
+	const SongList *m_songs;
 };
 
 struct ScrollDownArtist: BaseAction
@@ -302,7 +306,7 @@ private:
 	virtual void run() override;
 
 	NC::List *m_list;
-	SongList *m_songs;
+	const SongList *m_songs;
 };
 
 struct ScrollDownAlbum: BaseAction
@@ -314,7 +318,7 @@ private:
 	virtual void run() override;
 
 	NC::List *m_list;
-	SongList *m_songs;
+	const SongList *m_songs;
 };
 
 struct PageUp: BaseAction
@@ -680,6 +684,8 @@ struct JumpToPlayingSong: BaseAction
 private:
 	virtual bool canBeRun() override;
 	virtual void run() override;
+
+	MPD::Song m_song;
 };
 
 struct ToggleRepeat: BaseAction
@@ -1163,6 +1169,18 @@ private:
 	virtual void run() override;
 };
 
+struct FetchLyricsInBackground: BaseAction
+{
+	FetchLyricsInBackground()
+		: BaseAction(Type::FetchLyricsInBackground, "fetch_lyrics_in_background") { }
+
+private:
+	virtual bool canBeRun() override;
+	virtual void run() override;
+
+	HasSongs *m_hs;
+};
+
 struct RefetchLyrics: BaseAction
 {
 	RefetchLyrics(): BaseAction(Type::RefetchLyrics, "refetch_lyrics") { }
@@ -1198,16 +1216,6 @@ struct ToggleVisualizationType: BaseAction
 
 private:
 	
-	virtual bool canBeRun() override;
-	virtual void run() override;
-};
-
-struct SetVisualizerSampleMultiplier: BaseAction
-{
-	SetVisualizerSampleMultiplier()
-	: BaseAction(Type::SetVisualizerSampleMultiplier, "set_visualizer_sample_multiplier") { }
-
-private:
 	virtual bool canBeRun() override;
 	virtual void run() override;
 };

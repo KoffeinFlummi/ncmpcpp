@@ -25,13 +25,16 @@ Specify configuration file(s)
 Ignore unknown and invalid options in configuration files
 .TP
 .B \-c, \-\-bindings
-Specify bindings file
+Specify bindings file(s)
 .TP
 .B \-s, \-\-screen <name>
 Specify the startup screen (<name> may be: help, playlist, browser, search_engine, media_library, playlist_editor, tag_editor, outputs, visualizer, clock)
 .TP
 .B \-S, \-\-slave-screen <name>
 Specify the startup slave screen (<name> may be: help, playlist, browser, search_engine, media_library, playlist_editor, tag_editor, outputs, visualizer, clock)
+.TP
+.B \-q, \-\-quiet
+Suppress logs and excess output
 .TP
 .B \-?, \-\-help
 Display help.
@@ -82,9 +85,6 @@ Name of output that provides data for visualizer. Needed to keep sound and visua
 .B visualizer_in_stereo = yes/no
 Should be set to 'yes', if fifo output's format was set to 44100:16:2.
 .TP
-.B visualizer_sample_multiplier = NUMBER
-Multiply received samples by given value. Very useful for proper visualization of quiet music.
-.TP
 .B visualizer_sync_interval = SECONDS
 Defines interval between syncing visualizer and audio outputs.
 .TP
@@ -107,17 +107,31 @@ Delay for highlighting playlist since the last key was pressed. If set to 0, hig
 Delay for displayed messages to remain visible.
 .TP
 .B song_list_format
-Format for songs' list.
+Song format for lists of songs.
 .TP
 .B song_status_format
-Song's format for statusbar.
+Song format for statusbar.
 .TP
 .B song_library_format
+Song format for media library.
+.TP
 .B alternative_header_first_line_format = TEXT
 Now playing song format for the first line in alternative user interface header window.
 .TP
 .B alternative_header_second_line_format = TEXT
 Now playing song format for the second line in alternative user interface header window.
+.TP
+.B current_item_prefix = TEXT
+Prefix for currently selected item.
+.TP
+.B current_item_suffix = TEXT
+Suffix for currently selected item.
+.TP
+.B current_item_inactive_column_prefix = TEXT
+Prefix for currently selected item in the inactive column.
+.TP
+.B current_item_inactive_column_suffix = TEXT
+Suffix for currently selected item in the inactive column.
 .TP
 .B now_playing_prefix = TEXT
 Prefix for currently playing song.
@@ -205,9 +219,6 @@ If enabled, currently highlighted position in the list will be always centered.
 .B progressbar_look = TEXT
 This variable defines the look of progressbar. Note that it has to be exactly two or three characters long.
 .TP
-.B progressbar_boldness = yes/no
-This variable defines whether progressbar should be displayed in bold or not.
-.TP
 .B default_place_to_search_in = database/playlist
 If set to "playlist", Search engine will perform searching in current MPD playlist rather than in music database.
 .TP
@@ -219,6 +230,9 @@ If enabled, there will be a 250ms delay between refreshing position in media lib
 .TP
 .B media_library_primary_tag = artist/album_artist/date/genre/composer/performer
 Default tag type for leftmost column in media library.
+.TP
+.B media_library_albums_split_by_date = yes/no
+Determines whether albums in media library should be split by date.
 .TP
 .B default_find_mode = wrapped/normal
 If set to "wrapped", going from last found position to next will take you to the first one (same goes for the first position and going to previous one), otherwise no actions will be performed.
@@ -313,6 +327,9 @@ Type of currently used regular expressions.
 .B ignore_leading_the = yes/no
 If enabled, word "the" at the beginning of tags/filenames/sort format will be ignored while sorting items.
 .TP
+.B ignore_diacritics = yes/no
+If enabled, diacritics in strings will be ignored while searching and filtering lists.
+.TP
 .B block_search_constraints_change_if_items_found = yes/no
 If enabled, fields in Search engine above "Reset" button will be blocked after successful searching, otherwise they won't.
 .TP
@@ -373,9 +390,6 @@ One of colors used in Song info, Tiny tag editor and Search engine.
 .B color2 = COLOR
 One of colors used in Song info, Tiny tag editor and Search engine.
 .TP
-.B main_window_highlight_color = COLOR
-Color of main window's highlight.
-.TP
 .B progressbar_color = COLOR
 Color of progressbar.
 .TP
@@ -385,11 +399,14 @@ Color of part of progressbar that represents elapsed time.
 .B statusbar_color = COLOR
 Color of statusbar.
 .TP
+.B statusbar_time_color = COLOR
+Color of current track time shown in statusbar.
+.TP
+.B player_state_color = COLOR
+Color of player state shown in statusbar.
+.TP
 .B alternative_ui_separator_color = COLOR
 Color of separators used in alternative user interface.
-.TP
-.B active_column_color = COLOR
-Color of active column's highlight.
 .TP
 .B window_border_color = BORDER
 Border color of pop-up windows. If set to 'none', no border will be shown.
@@ -398,7 +415,7 @@ Border color of pop-up windows. If set to 'none', no border will be shown.
 Color of active window's border.
 .TP
 .SH "BINDINGS"
-When ncmpcpp starts, it tries to read user's bindings from ~/.ncmpcpp/bindings file. If no bindings file is found, ncmpcpp uses the defaults. An example bindings file with the default values can be found usually in /usr/share/doc/ncmpcpp (exact location may depend on used distribution or configure prefix).
+When ncmpcpp starts, it tries to read user's bindings from ~/.ncmpcpp/bindings and $XDG_CONFIG_HOME/ncmpcpp/bindings files. If no bindings file is found, ncmpcpp uses the defaults. An example bindings file with the default values can be found usually in /usr/share/doc/ncmpcpp (exact location may depend on used distribution or configure prefix).
 
 You can view current keybindings by pressing F1.
 .SH "SONG FORMAT"
@@ -447,11 +464,11 @@ Available values for colors:
 \fBNote\fR: colors can be nested, so if you write $2some$5text$9, it'll disable only usage of blue color and make red the current one.
 
 .SH "BUGS"
-Report bugs on http://www.musicpd.org/mantis/
+Report bugs on https://github.com/arybczak/ncmpcpp/issues
 .SH "NOTE"
 Since MPD uses UTF\-8, ncmpcpp needs to convert characters to the charset used by the local system. If you get character conversion errors while you are running ncmpcpp, you probably need to set up your locale. This is done by setting LANG and LC_ALL/LC_CTYPE environment variables (LC_CTYPE only affects character handling).
 .SH "HOMEPAGE"
--> http://unkart.ovh.org/ncmpcpp
+-> http://rybczak.net/ncmpcpp
 
 .SH "SEE ALSO"
 mpc(1), mpd(1)
