@@ -1,5 +1,5 @@
 /***************************************************************************
- *   Copyright (C) 2008-2014 by Andrzej Rybczak                            *
+ *   Copyright (C) 2008-2017 by Andrzej Rybczak                            *
  *   electricityispower@gmail.com                                          *
  *                                                                         *
  *   This program is free software; you can redistribute it and/or modify  *
@@ -33,50 +33,52 @@
 
 #include "actions.h"
 #include "bindings.h"
-#include "browser.h"
+#include "screens/browser.h"
 #include "charset.h"
 #include "configuration.h"
 #include "global.h"
 #include "helpers.h"
-#include "lyrics.h"
-#include "outputs.h"
-#include "playlist.h"
+#include "screens/lyrics.h"
+#include "screens/outputs.h"
+#include "screens/playlist.h"
 #include "settings.h"
 #include "status.h"
 #include "statusbar.h"
-#include "visualizer.h"
+#include "screens/visualizer.h"
 #include "title.h"
 #include "utility/conversion.h"
 
 namespace ph = std::placeholders;
 
-namespace
-{
-	std::ofstream errorlog;
-	std::streambuf *cerr_buffer;
-	bool run_resize_screen = false;
-	
-	void sighandler(int sig)
-	{
-		if (sig == SIGWINCH)
-		{
-			run_resize_screen = true;
-		}
-#		if defined(__sun) && defined(__SVR4)
-		// in solaris it is needed to reinstall the handler each time it's executed
-		signal(sig, sighandler);
-#		endif // __sun && __SVR4
-	}
+namespace {
 
-	void do_at_exit()
-	{
-		// restore old cerr buffer
-		std::cerr.rdbuf(cerr_buffer);
-		errorlog.close();
-		Mpd.Disconnect();
-		NC::destroyScreen();
-		windowTitle("");
-	}
+std::ofstream errorlog;
+std::streambuf *cerr_buffer;
+std::streambuf *clog_buffer;
+
+volatile bool run_resize_screen = false;
+	
+void sighandler(int sig)
+{
+	if (sig == SIGWINCH)
+		run_resize_screen = true;
+#if defined(__sun) && defined(__SVR4)
+	// in solaris it is needed to reinstall the handler each time it's executed
+	signal(sig, sighandler);
+#endif // __sun && __SVR4
+}
+
+void do_at_exit()
+{
+	// restore old cerr & clog buffers
+	std::cerr.rdbuf(cerr_buffer);
+	std::clog.rdbuf(clog_buffer);
+	errorlog.close();
+	Mpd.Disconnect();
+	NC::destroyScreen();
+	windowTitle("");
+}
+
 }
 
 int main(int argc, char **argv)
@@ -89,10 +91,12 @@ int main(int argc, char **argv)
 	using Global::VolumeState;
 	using Global::Timer;
 	
-	srand(time(nullptr));
 	std::setlocale(LC_ALL, "");
 	std::locale::global(Charset::internalLocale());
-	
+
+	// clog might be overriden in configure, so preserve the original buffer.
+	clog_buffer = std::clog.rdbuf();
+
 	if (!configure(argc, argv))
 		return 0;
 	
@@ -104,12 +108,10 @@ int main(int argc, char **argv)
 	cerr_buffer = std::cerr.rdbuf();
 	std::cerr.rdbuf(errorlog.rdbuf());
 	
-#	ifndef WIN32
-	signal(SIGPIPE, sighandler);
+	sigignore(SIGPIPE);
 	signal(SIGWINCH, sighandler);
-	// ignore Ctrl-C
-	sigignore(SIGINT);
-#	endif // !WIN32
+
+	Mpd.setNoidleCallback(Status::update);
 
 	NC::initScreen(Config.colors_enabled, Config.mouse_support);
 	
@@ -131,6 +133,9 @@ int main(int argc, char **argv)
 	
 	// initialize global timer
 	Timer = boost::posix_time::microsec_clock::local_time();
+
+	// initialize global random number generator
+	Global::RNG.seed(std::random_device()());
 	
 	// initialize playlist
 	myPlaylist->switchTo();
@@ -163,8 +168,7 @@ int main(int argc, char **argv)
 	auto input = NC::Key::None;
 	auto connect_attempt = boost::posix_time::from_time_t(0);
 	auto update_environment = static_cast<Actions::UpdateEnvironment &>(
-		Actions::get(Actions::Type::UpdateEnvironment)
-	);
+		Actions::get(Actions::Type::UpdateEnvironment));
 	
 	while (!Actions::ExitMainLoop)
 	{
@@ -198,14 +202,12 @@ int main(int argc, char **argv)
 				run_resize_screen = false;
 			}
 
-			update_environment.run(!key_pressed, key_pressed);
+			update_environment.run(!key_pressed, key_pressed, false);
 
 			input = readKey(*wFooter);
 			key_pressed = input != NC::Key::None;
 			if (!key_pressed)
 				continue;
-
-			//Statusbar::print(ToString(keyToWString(input)));
 
 			// The reason we want to update timer here is that if the timer is updated
 			// in Status::trace, then Key::read usually blocks for 500ms and if key is
@@ -234,7 +236,7 @@ int main(int argc, char **argv)
 			}
 
 			if (myScreen == myPlaylist)
-				myPlaylist->EnableHighlighting();
+				myPlaylist->enableHighlighting();
 		}
 		catch (MPD::ClientError &e)
 		{

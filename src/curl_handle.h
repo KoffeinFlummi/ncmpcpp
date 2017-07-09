@@ -1,5 +1,5 @@
 /***************************************************************************
- *   Copyright (C) 2008-2014 by Andrzej Rybczak                            *
+ *   Copyright (C) 2008-2017 by Andrzej Rybczak                            *
  *   electricityispower@gmail.com                                          *
  *                                                                         *
  *   This program is free software; you can redistribute it and/or modify  *
@@ -23,19 +23,14 @@
 
 #include "config.h"
 
-#ifdef HAVE_CURL_CURL_H
-
 #include <string>
 #include "curl/curl.h"
 
 namespace Curl
 {
-	CURLcode perform(std::string &data, const std::string &URL, const std::string &referer = "", unsigned timeout = 10);
+	CURLcode perform(std::string &data, const std::string &URL, const std::string &referer = "", bool follow_redirect = false, unsigned timeout = 10);
 	
 	std::string escape(const std::string &s);
 }
 
-#endif // HAVE_CURL_CURL_H
-
 #endif // NCMPCPP_CURL_HANDLE_H
-

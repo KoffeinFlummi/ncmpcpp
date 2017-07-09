@@ -1,5 +1,5 @@
 /***************************************************************************
- *   Copyright (C) 2008-2014 by Andrzej Rybczak                            *
+ *   Copyright (C) 2008-2017 by Andrzej Rybczak                            *
  *   electricityispower@gmail.com                                          *
  *                                                                         *
  *   This program is free software; you can redistribute it and/or modify  *
@@ -22,8 +22,10 @@
 #define NCMPCPP_GLOBAL_H
 
 #include <boost/date_time/posix_time/posix_time_types.hpp>
+#include <random>
+
 #include "mpdpp.h"
-#include "screen.h"
+#include "screens/screen.h"
 
 namespace Global {
 
@@ -57,6 +59,9 @@ extern std::string VolumeState;
 
 // global timer
 extern boost::posix_time::ptime Timer;
+
+// global RNG
+extern std::mt19937 RNG;
 
 }
 

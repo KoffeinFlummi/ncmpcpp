@@ -1,5 +1,5 @@
 /***************************************************************************
- *   Copyright (C) 2008-2014 by Andrzej Rybczak                            *
+ *   Copyright (C) 2008-2017 by Andrzej Rybczak                            *
  *   electricityispower@gmail.com                                          *
  *                                                                         *
  *   This program is free software; you can redistribute it and/or modify  *
@@ -21,13 +21,12 @@
 #include <cassert>
 #include <cerrno>
 #include <cstring>
-#include <boost/array.hpp>
+#include <boost/date_time/posix_time/posix_time.hpp>
 #include <boost/filesystem/operations.hpp>
 #include <boost/locale/conversion.hpp>
 #include <boost/lexical_cast.hpp>
 #include <algorithm>
 #include <iostream>
-#include <readline/readline.h>
 
 #include "actions.h"
 #include "charset.h"
@@ -39,28 +38,30 @@
 #include "statusbar.h"
 #include "utility/comparators.h"
 #include "utility/conversion.h"
+#include "utility/scoped_value.h"
 
+#include "curses/menu_impl.h"
 #include "bindings.h"
-#include "browser.h"
-#include "clock.h"
-#include "help.h"
-#include "media_library.h"
-#include "menu_impl.h"
-#include "lastfm.h"
-#include "lyrics.h"
-#include "playlist.h"
-#include "playlist_editor.h"
-#include "sort_playlist.h"
-#include "search_engine.h"
-#include "sel_items_adder.h"
-#include "server_info.h"
-#include "song_info.h"
-#include "outputs.h"
+#include "screens/browser.h"
+#include "screens/clock.h"
+#include "screens/help.h"
+#include "screens/media_library.h"
+#include "screens/lastfm.h"
+#include "screens/lyrics.h"
+#include "screens/playlist.h"
+#include "screens/playlist_editor.h"
+#include "screens/sort_playlist.h"
+#include "screens/search_engine.h"
+#include "screens/sel_items_adder.h"
+#include "screens/server_info.h"
+#include "screens/song_info.h"
+#include "screens/outputs.h"
+#include "utility/readline.h"
 #include "utility/string.h"
 #include "utility/type_conversions.h"
-#include "tag_editor.h"
-#include "tiny_tag_editor.h"
-#include "visualizer.h"
+#include "screens/tag_editor.h"
+#include "screens/tiny_tag_editor.h"
+#include "screens/visualizer.h"
 #include "title.h"
 #include "tags.h"
 
@@ -75,17 +76,15 @@ namespace ph = std::placeholders;
 
 namespace {
 
-boost::array<
-	Actions::BaseAction *, static_cast<size_t>(Actions::Type::_numberOfActions)
-> AvailableActions;
+std::vector<std::shared_ptr<Actions::BaseAction>> AvailableActions;
 
 void populateActions();
 
-bool scrollTagCanBeRun(NC::List *&list, SongList *&songs);
-void scrollTagUpRun(NC::List *list, SongList *songs, MPD::Song::GetFunction get);
-void scrollTagDownRun(NC::List *list, SongList *songs, MPD::Song::GetFunction get);
+bool scrollTagCanBeRun(NC::List *&list, const SongList *&songs);
+void scrollTagUpRun(NC::List *list, const SongList *songs, MPD::Song::GetFunction get);
+void scrollTagDownRun(NC::List *list, const SongList *songs, MPD::Song::GetFunction get);
 
-void seek();
+void seek(SearchDirection sd);
 void findItem(const SearchDirection direction);
 void listsChangeFinisher();
 
@@ -96,6 +95,22 @@ bool findSelectedRangeAndPrintInfoIfNot(Iterator &first, Iterator &last)
 	if (!success)
 		Statusbar::print("No range selected");
 	return success;
+}
+
+template <typename Iterator>
+Iterator nextScreenTypeInSequence(Iterator first, Iterator last, ScreenType type)
+{
+	auto it = std::find(first, last, type);
+	if (it == last)
+		return first;
+	else
+	{
+		++it;
+		if (it == last)
+			return first;
+		else
+			return it;
+	}
 }
 
 }
@@ -134,11 +149,8 @@ void initializeScreens()
 	mySongInfo = new SongInfo;
 	myServerInfo = new ServerInfo;
 	mySortPlaylistDialog = new SortPlaylistDialog;
-	
-#	ifdef HAVE_CURL_CURL_H
 	myLastfm = new Lastfm;
-#	endif // HAVE_CURL_CURL_H
-	
+
 #	ifdef HAVE_TAGLIB_H
 	myTinyTagEditor = new TinyTagEditor;
 	myTagEditor = new TagEditor;
@@ -171,11 +183,8 @@ void setResizeFlags()
 	mySongInfo->hasToBeResized = 1;
 	myServerInfo->hasToBeResized = 1;
 	mySortPlaylistDialog->hasToBeResized = 1;
-	
-#	ifdef HAVE_CURL_CURL_H
 	myLastfm->hasToBeResized = 1;
-#	endif // HAVE_CURL_CURL_H
-	
+
 #	ifdef HAVE_TAGLIB_H
 	myTinyTagEditor->hasToBeResized = 1;
 	myTagEditor->hasToBeResized = 1;
@@ -206,6 +215,8 @@ void resizeScreen(bool reload_main_window)
 		rl_resize_terminal();
 		endwin();
 		refresh();
+		// Remove KEY_RESIZE from input queue, I'm not sure how these make it in.
+		getch();
 	}
 
 	MainHeight = LINES-(Config.design == Design::Alternative ? 7 : 4);
@@ -257,7 +268,7 @@ void setWindowsDimensions()
 	if (!Config.statusbar_visibility)
 		++MainHeight;
 	
-	HeaderHeight = Config.design == Design::Alternative ? (Config.header_visibility ? 5 : 3) : 1;
+	HeaderHeight = Config.design == Design::Alternative ? (Config.header_visibility ? 5 : 3) : 2;
 	FooterStartY = LINES-(Config.statusbar_visibility ? 2 : 1);
 	FooterHeight = Config.statusbar_visibility ? 2 : 1;
 }
@@ -269,9 +280,9 @@ void confirmAction(const boost::format &description)
 	<< " [" << NC::Format::Bold << 'y' << NC::Format::NoBold
 	<< '/' << NC::Format::Bold << 'n' << NC::Format::NoBold
 	<< "] ";
-	auto answer = Statusbar::Helpers::promptReturnOneOf({"y", "n"});
-	if (answer == "n")
-		throw NC::PromptAborted(std::move(answer));
+	char answer = Statusbar::Helpers::promptReturnOneOf({'y', 'n'});
+	if (answer == 'n')
+		throw NC::PromptAborted(std::string(1, answer));
 }
 
 bool isMPDMusicDirSet()
@@ -286,24 +297,28 @@ bool isMPDMusicDirSet()
 
 BaseAction &get(Actions::Type at)
 {
-	if (AvailableActions[1] == nullptr)
+	if (AvailableActions.empty())
 		populateActions();
-	BaseAction *action = AvailableActions[static_cast<size_t>(at)];
-	// action should be always present if action type in queried
-	assert(action != nullptr);
-	return *action;
+	return *AvailableActions.at(static_cast<size_t>(at));
 }
 
-BaseAction *get(const std::string &name)
+std::shared_ptr<BaseAction> get_(Actions::Type at)
 {
-	BaseAction *result = 0;
-	if (AvailableActions[1] == nullptr)
+	if (AvailableActions.empty())
 		populateActions();
-	for (auto it = AvailableActions.begin(); it != AvailableActions.end(); ++it)
+	return AvailableActions.at(static_cast<size_t>(at));
+}
+
+std::shared_ptr<BaseAction> get_(const std::string &name)
+{
+	std::shared_ptr<BaseAction> result;
+	if (AvailableActions.empty())
+		populateActions();
+	for (const auto &action : AvailableActions)
 	{
-		if (*it != nullptr && (*it)->name() == name)
+		if (action->name() == name)
 		{
-			result = *it;
+			result = action;
 			break;
 		}
 	}
@@ -315,12 +330,16 @@ UpdateEnvironment::UpdateEnvironment()
 , m_past(boost::posix_time::from_time_t(0))
 { }
 
-void UpdateEnvironment::run(bool update_timer, bool refresh_window)
+void UpdateEnvironment::run(bool update_timer, bool refresh_window, bool mpd_sync)
 {
 	using Global::Timer;
 
 	// update timer, status if necessary etc.
 	Status::trace(update_timer, true);
+
+	// show lyrics consumer notification if appropriate
+	if (auto message = myLyrics->tryTakeConsumerMessage())
+		Statusbar::print(*message);
 
 	// header stuff
 	if ((myScreen == myPlaylist || myScreen == myBrowser || myScreen == myLyrics)
@@ -333,11 +352,19 @@ void UpdateEnvironment::run(bool update_timer, bool refresh_window)
 
 	if (refresh_window)
 		myScreen->refreshWindow();
+
+	// We want to synchronize with MPD during execution of an action chain.
+	if (mpd_sync)
+	{
+		int flags = Mpd.noidle();
+		if (flags)
+			Status::update(flags);
+	}
 }
 
 void UpdateEnvironment::run()
 {
-	run(true, true);
+	run(true, true, true);
 }
 
 bool MouseEvent::canBeRun()
@@ -501,7 +528,7 @@ void JumpToParentDirectory::run()
 		if (!myBrowser->inRootDirectory())
 		{
 			myBrowser->main().reset();
-			myBrowser->enterPressed();
+			myBrowser->enterDirectory();
 		}
 	}
 #	ifdef HAVE_TAGLIB_H
@@ -510,37 +537,46 @@ void JumpToParentDirectory::run()
 		if (myTagEditor->CurrentDir() != "/")
 		{
 			myTagEditor->Dirs->reset();
-			myTagEditor->enterPressed();
+			myTagEditor->enterDirectory();
 		}
 	}
 #	endif // HAVE_TAGLIB_H
 }
 
-void PressEnter::run()
+bool RunAction::canBeRun()
 {
-	myScreen->enterPressed();
+	m_ha = dynamic_cast<HasActions *>(myScreen);
+	return m_ha != nullptr
+		&& m_ha->actionRunnable();
+}
+
+void RunAction::run()
+{
+	m_ha->runAction();
 }
 
 bool PreviousColumn::canBeRun()
 {
-	auto hc = hasColumns(myScreen);
-	return hc && hc->previousColumnAvailable();
+	m_hc = dynamic_cast<HasColumns *>(myScreen);
+	return m_hc != nullptr
+		&& m_hc->previousColumnAvailable();
 }
 
 void PreviousColumn::run()
 {
-	hasColumns(myScreen)->previousColumn();
+	m_hc->previousColumn();
 }
 
 bool NextColumn::canBeRun()
 {
-	auto hc = hasColumns(myScreen);
-	return hc && hc->nextColumnAvailable();
+	m_hc = dynamic_cast<HasColumns *>(myScreen);
+	return m_hc != nullptr
+		&& m_hc->nextColumnAvailable();
 }
 
 void NextColumn::run()
 {
-	hasColumns(myScreen)->nextColumn();
+	m_hc->nextColumn();
 }
 
 bool MasterScreen::canBeRun()
@@ -587,31 +623,41 @@ void SlaveScreen::run()
 
 void VolumeUp::run()
 {
-	int volume = std::min(Status::State::volume()+Config.volume_change_step, 100u);
-	Mpd.SetVolume(volume);
+	Mpd.ChangeVolume(static_cast<int>(Config.volume_change_step));
 }
 
 void VolumeDown::run()
 {
-	int volume = std::max(int(Status::State::volume()-Config.volume_change_step), 0);
-	Mpd.SetVolume(volume);
+	Mpd.ChangeVolume(-static_cast<int>(Config.volume_change_step));
 }
 
 bool AddItemToPlaylist::canBeRun()
 {
-	if (m_hs != static_cast<void *>(myScreen))
-		m_hs = dynamic_cast<HasSongs *>(myScreen);
-	return m_hs != nullptr;
+	m_hs = dynamic_cast<HasSongs *>(myScreen);
+	return m_hs != nullptr && m_hs->itemAvailable();
 }
 
 void AddItemToPlaylist::run()
 {
-	bool success = m_hs->addItemToPlaylist();
+	bool success = m_hs->addItemToPlaylist(false);
 	if (success)
 	{
 		myScreen->scroll(NC::Scroll::Down);
 		listsChangeFinisher();
 	}
+}
+
+bool PlayItem::canBeRun()
+{
+	m_hs = dynamic_cast<HasSongs *>(myScreen);
+	return m_hs != nullptr && m_hs->itemAvailable();
+}
+
+void PlayItem::run()
+{
+	bool success = m_hs->addItemToPlaylist(true);
+	if (success)
+		listsChangeFinisher();
 }
 
 bool DeletePlaylistItems::canBeRun()
@@ -856,16 +902,27 @@ bool MoveSelectedItemsUp::canBeRun()
 
 void MoveSelectedItemsUp::run()
 {
+	const char *filteredMsg = "Moving items up is disabled in filtered playlist";
 	if (myScreen == myPlaylist)
 	{
-		moveSelectedItemsUp(myPlaylist->main(), std::bind(&MPD::Connection::Move, ph::_1, ph::_2, ph::_3));
+		if (myPlaylist->main().isFiltered())
+			Statusbar::print(filteredMsg);
+		else
+			moveSelectedItemsUp(
+				myPlaylist->main(),
+				std::bind(&MPD::Connection::Move, ph::_1, ph::_2, ph::_3));
 	}
 	else if (myScreen == myPlaylistEditor)
 	{
-		assert(!myPlaylistEditor->Playlists.empty());
-		std::string playlist = myPlaylistEditor->Playlists.current()->value().path();
-		auto move_fun = std::bind(&MPD::Connection::PlaylistMove, ph::_1, playlist, ph::_2, ph::_3);
-		moveSelectedItemsUp(myPlaylistEditor->Content, move_fun);
+		if (myPlaylistEditor->Content.isFiltered())
+			Statusbar::print(filteredMsg);
+		else
+		{
+			auto playlist = myPlaylistEditor->Playlists.current()->value().path();
+			moveSelectedItemsUp(
+				myPlaylistEditor->Content,
+				std::bind(&MPD::Connection::PlaylistMove, ph::_1, playlist, ph::_2, ph::_3));
+		}
 	}
 }
 
@@ -879,16 +936,27 @@ bool MoveSelectedItemsDown::canBeRun()
 
 void MoveSelectedItemsDown::run()
 {
+	const char *filteredMsg = "Moving items down is disabled in filtered playlist";
 	if (myScreen == myPlaylist)
 	{
-		moveSelectedItemsDown(myPlaylist->main(), std::bind(&MPD::Connection::Move, ph::_1, ph::_2, ph::_3));
+		if (myPlaylist->main().isFiltered())
+			Statusbar::print(filteredMsg);
+		else
+			moveSelectedItemsDown(
+				myPlaylist->main(),
+				std::bind(&MPD::Connection::Move, ph::_1, ph::_2, ph::_3));
 	}
 	else if (myScreen == myPlaylistEditor)
 	{
-		assert(!myPlaylistEditor->Playlists.empty());
-		std::string playlist = myPlaylistEditor->Playlists.current()->value().path();
-		auto move_fun = std::bind(&MPD::Connection::PlaylistMove, ph::_1, playlist, ph::_2, ph::_3);
-		moveSelectedItemsDown(myPlaylistEditor->Content, move_fun);
+		if (myPlaylistEditor->Content.isFiltered())
+			Statusbar::print(filteredMsg);
+		else
+		{
+			auto playlist = myPlaylistEditor->Playlists.current()->value().path();
+			moveSelectedItemsDown(
+				myPlaylistEditor->Content,
+				std::bind(&MPD::Connection::PlaylistMove, ph::_1, playlist, ph::_2, ph::_3));
+		}
 	}
 }
 
@@ -963,7 +1031,7 @@ bool SeekForward::canBeRun()
 
 void SeekForward::run()
 {
-	seek();
+	seek(SearchDirection::Forward);
 }
 
 bool SeekBackward::canBeRun()
@@ -973,7 +1041,7 @@ bool SeekBackward::canBeRun()
 
 void SeekBackward::run()
 {
-	seek();
+	seek(SearchDirection::Backward);
 }
 
 bool ToggleDisplayMode::canBeRun()
@@ -1094,35 +1162,16 @@ void ToggleLyricsUpdateOnSongChange::run()
 	);
 }
 
-#ifndef HAVE_CURL_CURL_H
-bool ToggleLyricsFetcher::canBeRun()
-{
-	return false;
-}
-#endif // NOT HAVE_CURL_CURL_H
-
 void ToggleLyricsFetcher::run()
 {
-#	ifdef HAVE_CURL_CURL_H
-	myLyrics->ToggleFetcher();
-#	endif // HAVE_CURL_CURL_H
+	myLyrics->toggleFetcher();
 }
-
-#ifndef HAVE_CURL_CURL_H
-bool ToggleFetchingLyricsInBackground::canBeRun()
-{
-	return false;
-}
-#endif // NOT HAVE_CURL_CURL_H
 
 void ToggleFetchingLyricsInBackground::run()
 {
-#	ifdef HAVE_CURL_CURL_H
 	Config.fetch_lyrics_in_background = !Config.fetch_lyrics_in_background;
 	Statusbar::printf("Fetching lyrics for playing songs in background: %1%",
-		Config.fetch_lyrics_in_background ? "on" : "off"
-	);
-#	endif // HAVE_CURL_CURL_H
+	                  Config.fetch_lyrics_in_background ? "on" : "off");
 }
 
 void TogglePlayingSongCentering::run()
@@ -1135,7 +1184,7 @@ void TogglePlayingSongCentering::run()
 	{
 		auto s = myPlaylist->nowPlayingSong();
 		if (!s.empty())
-			myPlaylist->main().highlight(s.getPosition());
+			myPlaylist->locateSong(s);
 	}
 }
 
@@ -1153,27 +1202,31 @@ void UpdateDatabase::run()
 
 bool JumpToPlayingSong::canBeRun()
 {
-	return myScreen == myPlaylist
-	    || myScreen == myBrowser
-	    || myScreen == myLibrary;
+	m_song = myPlaylist->nowPlayingSong();
+	return !m_song.empty()
+		&& (myScreen == myPlaylist
+		    || myScreen == myPlaylistEditor
+		    || myScreen == myBrowser
+		    || myScreen == myLibrary);
 }
 
 void JumpToPlayingSong::run()
 {
-	auto s = myPlaylist->nowPlayingSong();
-	if (s.empty())
-		return;
 	if (myScreen == myPlaylist)
 	{
-		myPlaylist->main().highlight(s.getPosition());
+		myPlaylist->locateSong(m_song);
+	}
+	else if (myScreen == myPlaylistEditor)
+	{
+		myPlaylistEditor->locateSong(m_song);
 	}
 	else if (myScreen == myBrowser)
 	{
-		myBrowser->locateSong(s);
+		myBrowser->locateSong(m_song);
 	}
 	else if (myScreen == myLibrary)
 	{
-		myLibrary->LocateSong(s);
+		myLibrary->locateSong(m_song);
 	}
 }
 
@@ -1193,6 +1246,8 @@ bool Shuffle::canBeRun()
 
 void Shuffle::run()
 {
+	if (Config.ask_before_shuffling_playlists)
+		confirmAction("Do you really want to shuffle selected range?");
 	auto begin = myPlaylist->main().begin();
 	Mpd.ShuffleRange(m_begin-begin, m_end-begin);
 	Statusbar::print("Range shuffled");
@@ -1214,7 +1269,7 @@ void StartSearching::run()
 	mySearcher->main().setHighlighting(0);
 	mySearcher->main().refresh();
 	mySearcher->main().setHighlighting(1);
-	mySearcher->enterPressed();
+	mySearcher->runAction();
 }
 
 bool SaveTagChanges::canBeRun()
@@ -1233,12 +1288,12 @@ void SaveTagChanges::run()
 	if (myScreen == myTinyTagEditor)
 	{
 		myTinyTagEditor->main().highlight(myTinyTagEditor->main().size()-2); // Save
-		myTinyTagEditor->enterPressed();
+		myTinyTagEditor->runAction();
 	}
 	else if (myScreen->activeWindow() == myTagEditor->TagTypes)
 	{
 		myTagEditor->TagTypes->highlight(myTagEditor->TagTypes->size()-1); // Save
-		myTagEditor->enterPressed();
+		myTagEditor->runAction();
 	}
 #	endif // HAVE_TAGLIB_H
 }
@@ -1283,6 +1338,34 @@ void SetVolume::run()
 		Mpd.SetVolume(volume);
 	}
 	Statusbar::printf("Volume set to %1%%%", volume);
+}
+
+bool EnterDirectory::canBeRun()
+{
+	bool result = false;
+	if (myScreen == myBrowser && !myBrowser->main().empty())
+	{
+		result = myBrowser->main().current()->value().type()
+			== MPD::Item::Type::Directory;
+	}
+#ifdef HAVE_TAGLIB_H
+	else if (myScreen->activeWindow() == myTagEditor->Dirs)
+		result = true;
+#endif // HAVE_TAGLIB_H
+	return result;
+}
+
+void EnterDirectory::run()
+{
+	if (myScreen == myBrowser)
+		myBrowser->enterDirectory();
+#ifdef HAVE_TAGLIB_H
+	else if (myScreen->activeWindow() == myTagEditor->Dirs)
+	{
+		if (!myTagEditor->enterDirectory())
+			Statusbar::print("No subdirectories found");
+	}
+#endif // HAVE_TAGLIB_H
 }
 
 bool EditSong::canBeRun()
@@ -1343,8 +1426,8 @@ void EditLibraryTag::run()
 			if (!Tags::write(ms))
 			{
 				success = false;
-				const char msg[] = "Error while updating tags in \"%1%\"";
-				Statusbar::printf(msg, wideShorten(ms.getURI(), COLS-const_strlen(msg)));
+				Statusbar::printf("Error while writing tags to \"%1%\": %2%",
+				                  ms.getName(), strerror(errno));
 				s.finish();
 				break;
 			}
@@ -1527,7 +1610,7 @@ bool EditLyrics::canBeRun()
 
 void EditLyrics::run()
 {
-	myLyrics->Edit();
+	myLyrics->edit();
 }
 
 bool JumpToBrowser::canBeRun()
@@ -1549,7 +1632,7 @@ bool JumpToMediaLibrary::canBeRun()
 
 void JumpToMediaLibrary::run()
 {
-	myLibrary->LocateSong(*m_song);
+	myLibrary->locateSong(*m_song);
 }
 
 bool JumpToPlaylistEditor::canBeRun()
@@ -1560,7 +1643,7 @@ bool JumpToPlaylistEditor::canBeRun()
 
 void JumpToPlaylistEditor::run()
 {
-	myPlaylistEditor->Locate(myBrowser->main().current()->value().playlist());
+	myPlaylistEditor->locatePlaylist(myBrowser->main().current()->value().playlist());
 }
 
 void ToggleScreenLock::run()
@@ -1728,28 +1811,25 @@ bool SelectAlbum::canBeRun()
 void SelectAlbum::run()
 {
 	const auto front = m_songs->beginS(), current = m_songs->currentS(), end = m_songs->endS();
-	auto *s = current->get<Bit::Song>();
-	if (s == nullptr)
+	if (current->song() == nullptr)
 		return;
 	auto get = &MPD::Song::getAlbum;
-	const std::string tag = s->getTags(get);
+	const std::string tag = current->song()->getTags(get);
 	// go up
 	for (auto it = current; it != front;)
 	{
 		--it;
-		s = it->get<Bit::Song>();
-		if (s == nullptr || s->getTags(get) != tag)
+		if (it->song() == nullptr || it->song()->getTags(get) != tag)
 			break;
-		it->get<Bit::Properties>().setSelected(true);
+		it->properties().setSelected(true);
 	}
 	// go down
 	for (auto it = current;;)
 	{
-		it->get<Bit::Properties>().setSelected(true);
+		it->properties().setSelected(true);
 		if (++it == end)
 			break;
-		s = it->get<Bit::Song>();
-		if (s == nullptr || s->getTags(get) != tag)
+		if (it->song() == nullptr || it->song()->getTags(get) != tag)
 			break;
 	}
 	Statusbar::print("Album around cursor position selected");
@@ -1768,12 +1848,12 @@ void SelectFoundItems::run()
 {
 	auto current_pos = m_list->choice();
 	myScreen->activeWindow()->scroll(NC::Scroll::Home);
-	bool found = m_searchable->find(SearchDirection::Forward, false, false);
+	bool found = m_searchable->search(SearchDirection::Forward, false, false);
 	if (found)
 	{
 		Statusbar::print("Searching for items...");
 		m_list->currentP()->setSelected(true);
-		while (m_searchable->find(SearchDirection::Forward, false, true))
+		while (m_searchable->search(SearchDirection::Forward, false, true))
 			m_list->currentP()->setSelected(true);
 		Statusbar::print("Found items selected");
 	}
@@ -1882,14 +1962,56 @@ void ReversePlaylist::run()
 	Statusbar::print("Range reversed");
 }
 
+bool ApplyFilter::canBeRun()
+{
+	m_filterable = dynamic_cast<Filterable *>(myScreen);
+	return m_filterable != nullptr
+		&& m_filterable->allowsFiltering();
+}
+
+void ApplyFilter::run()
+{
+	using Global::wFooter;
+
+	std::string filter = m_filterable->currentFilter();
+	if (!filter.empty())
+	{
+		m_filterable->applyFilter(filter);
+		myScreen->refreshWindow();
+	}
+
+	try
+	{
+		ScopedValue<bool> disabled_autocenter_mode(Config.autocenter_mode, false);
+		Statusbar::ScopedLock slock;
+		NC::Window::ScopedPromptHook helper(
+			*wFooter,
+			Statusbar::Helpers::ApplyFilterImmediately(m_filterable));
+		Statusbar::put() << "Apply filter: ";
+		filter = wFooter->prompt(filter);
+	}
+	catch (NC::PromptAborted &)
+	{
+		m_filterable->applyFilter(filter);
+		throw;
+	}
+
+	if (filter.empty())
+		Statusbar::printf("Filtering disabled");
+	else
+		Statusbar::printf("Using filter \"%1%\"", filter);
+
+	if (myScreen == myPlaylist)
+		myPlaylist->reloadTotalLength();
+
+	listsChangeFinisher();
+}
+
 bool Find::canBeRun()
 {
 	return myScreen == myHelp
-	    || myScreen == myLyrics
-#	ifdef HAVE_CURL_CURL_H
-	    || myScreen == myLastfm
-#	endif // HAVE_CURL_CURL_H
-	;
+		|| myScreen == myLyrics
+		|| myScreen == myLastfm;
 }
 
 void Find::run()
@@ -1946,7 +2068,7 @@ void NextFoundItem::run()
 {
 	Searchable *w = dynamic_cast<Searchable *>(myScreen);
 	assert(w != nullptr);
-	w->find(SearchDirection::Forward, Config.wrapped_search, true);
+	w->search(SearchDirection::Forward, Config.wrapped_search, true);
 	listsChangeFinisher();
 }
 
@@ -1959,7 +2081,7 @@ void PreviousFoundItem::run()
 {
 	Searchable *w = dynamic_cast<Searchable *>(myScreen);
 	assert(w != nullptr);
-	w->find(SearchDirection::Backward, Config.wrapped_search, true);
+	w->search(SearchDirection::Backward, Config.wrapped_search, true);
 	listsChangeFinisher();
 }
 
@@ -1983,7 +2105,7 @@ void ToggleReplayGainMode::run()
 		<< "/" << NC::Format::Bold << 't' << NC::Format::NoBold << "rack"
 		<< "/" << NC::Format::Bold << 'a' << NC::Format::NoBold << "lbum"
 		<< "] ";
-		rgm = Statusbar::Helpers::promptReturnOneOf({"t", "a", "o"})[0];
+		rgm = Statusbar::Helpers::promptReturnOneOf({'t', 'a', 'o'});
 	}
 	switch (rgm)
 	{
@@ -2053,7 +2175,7 @@ void AddRandomItems::run()
 		<< "/" << "album" << NC::Format::Bold << 'A' << NC::Format::NoBold << "rtists"
 		<< "/" << "al" << NC::Format::Bold << 'b' << NC::Format::NoBold << "ums"
 		<< "] ";
-		rnd_type = Statusbar::Helpers::promptReturnOneOf({"s", "a", "A", "b"})[0];
+		rnd_type = Statusbar::Helpers::promptReturnOneOf({'s', 'a', 'A', 'b'});
 	}
 
 	mpd_tag_type tag_type = MPD_TAG_ARTIST;
@@ -2072,11 +2194,15 @@ void AddRandomItems::run()
 		Statusbar::put() << "Number of random " << tag_type_str << "s: ";
 		number = fromString<unsigned>(wFooter->prompt());
 	}
-	if (number && (rnd_type == 's' ? Mpd.AddRandomSongs(number) : Mpd.AddRandomTag(tag_type, number)))
+	if (number > 0)
 	{
-		Statusbar::printf("%1% random %2%%3% added to playlist",
-			number, tag_type_str, number == 1 ? "" : "s"
-		);
+		bool success;
+		if (rnd_type == 's')
+			success = Mpd.AddRandomSongs(number, Global::RNG);
+		else
+			success = Mpd.AddRandomTag(tag_type, number, Global::RNG);
+		if (success)
+			Statusbar::printf("%1% random %2%%3% added to playlist", number, tag_type_str, number == 1 ? "" : "s");
 	}
 }
 
@@ -2117,7 +2243,7 @@ void ToggleBrowserSortMode::run()
 bool ToggleLibraryTagType::canBeRun()
 {
 	return (myScreen->isActiveWindow(myLibrary->Tags))
-	    || (myLibrary->Columns() == 2 && myScreen->isActiveWindow(myLibrary->Albums));
+	    || (myLibrary->columns() == 2 && myScreen->isActiveWindow(myLibrary->Albums));
 }
 
 void ToggleLibraryTagType::run()
@@ -2135,7 +2261,7 @@ void ToggleLibraryTagType::run()
 		<< "/" << NC::Format::Bold << 'c' << NC::Format::NoBold << "omposer"
 		<< "/" << NC::Format::Bold << 'p' << NC::Format::NoBold << "erformer"
 		<< "] ";
-		tag_type = Statusbar::Helpers::promptReturnOneOf({"a", "A", "y", "g", "c", "p"})[0];
+		tag_type = Statusbar::Helpers::promptReturnOneOf({'a', 'A', 'y', 'g', 'c', 'p'});
 	}
 	mpd_tag_type new_tagitem = charToTagType(tag_type);
 	if (new_tagitem != Config.media_lib_primary_tag)
@@ -2148,7 +2274,7 @@ void ToggleLibraryTagType::run()
 		std::string and_mtime = Config.media_library_sort_by_mtime ?
 		                        " and mtime" :
 		                        "";
-		if (myLibrary->Columns() == 2)
+		if (myLibrary->columns() == 2)
 		{
 			myLibrary->Songs.clear();
 			myLibrary->Albums.reset();
@@ -2175,20 +2301,28 @@ void ToggleMediaLibrarySortMode::run()
 	myLibrary->toggleSortMode();
 }
 
+bool FetchLyricsInBackground::canBeRun()
+{
+	m_hs = dynamic_cast<HasSongs *>(myScreen);
+	return m_hs != nullptr && m_hs->itemAvailable();
+}
+
+void FetchLyricsInBackground::run()
+{
+	auto songs = m_hs->getSelectedSongs();
+	for (const auto &s : songs)
+		myLyrics->fetchInBackground(s, true);
+	Statusbar::print("Selected songs queued for lyrics fetching");
+}
+
 bool RefetchLyrics::canBeRun()
 {
-#	ifdef HAVE_CURL_CURL_H
 	return myScreen == myLyrics;
-#	else
-	return false;
-#	endif // HAVE_CURL_CURL_H
 }
 
 void RefetchLyrics::run()
 {
-#	ifdef HAVE_CURL_CURL_H
-	myLyrics->Refetch();
-#	endif // HAVE_CURL_CURL_H
+	myLyrics->refetchCurrent();
 }
 
 bool SetSelectedItemsPriority::canBeRun()
@@ -2212,7 +2346,23 @@ void SetSelectedItemsPriority::run()
 		prio = fromString<unsigned>(wFooter->prompt());
 		boundsCheck(prio, 0u, 255u);
 	}
-	myPlaylist->SetSelectedItemsPriority(prio);
+	myPlaylist->setSelectedItemsPriority(prio);
+}
+
+bool ToggleOutput::canBeRun()
+{
+#ifdef ENABLE_OUTPUTS
+	return myScreen == myOutputs;
+#else
+	return false;
+#endif // ENABLE_OUTPUTS
+}
+
+void ToggleOutput::run()
+{
+#ifdef ENABLE_OUTPUTS
+	myOutputs->toggleOutput();
+#endif // ENABLE_OUTPUTS
 }
 
 bool ToggleVisualizationType::canBeRun()
@@ -2231,32 +2381,6 @@ void ToggleVisualizationType::run()
 #	endif // ENABLE_VISUALIZER
 }
 
-bool SetVisualizerSampleMultiplier::canBeRun()
-{
-#	ifdef ENABLE_VISUALIZER
-	return myScreen == myVisualizer;
-#	else
-	return false;
-#	endif // ENABLE_VISUALIZER
-}
-
-void SetVisualizerSampleMultiplier::run()
-{
-#	ifdef ENABLE_VISUALIZER
-	using Global::wFooter;
-
-	double multiplier;
-	{
-		Statusbar::ScopedLock slock;
-		Statusbar::put() << "Set visualizer sample multiplier: ";
-		multiplier = fromString<double>(wFooter->prompt());
-		lowerBoundCheck(multiplier, 0.0);
-		Config.visualizer_sample_multiplier = multiplier;
-	}
-	Statusbar::printf("Visualizer sample multiplier set to %1%", multiplier);
-#	endif // ENABLE_VISUALIZER
-}
-
 void ShowSongInfo::run()
 {
 	mySongInfo->switchTo();
@@ -2264,20 +2388,15 @@ void ShowSongInfo::run()
 
 bool ShowArtistInfo::canBeRun()
 {
-	#ifdef HAVE_CURL_CURL_H
 	return myScreen == myLastfm
-	  ||   (myScreen->isActiveWindow(myLibrary->Tags)
-	    && !myLibrary->Tags.empty()
-	    && Config.media_lib_primary_tag == MPD_TAG_ARTIST)
-	  ||   currentSong(myScreen);
-#	else
-	return false;
-#	endif // NOT HAVE_CURL_CURL_H
+		|| (myScreen->isActiveWindow(myLibrary->Tags)
+		    && !myLibrary->Tags.empty()
+		    && Config.media_lib_primary_tag == MPD_TAG_ARTIST)
+		|| currentSong(myScreen);
 }
 
 void ShowArtistInfo::run()
 {
-#	ifdef HAVE_CURL_CURL_H
 	if (myScreen == myLastfm)
 	{
 		myLastfm->switchTo();
@@ -2301,14 +2420,31 @@ void ShowArtistInfo::run()
 	if (!artist.empty())
 	{
 		myLastfm->queueJob(new LastFm::ArtistInfo(artist, Config.lastfm_preferred_language));
-		myLastfm->switchTo();
+		if (!isVisible(myLastfm))
+			myLastfm->switchTo();
 	}
-#	endif // HAVE_CURL_CURL_H
+}
+
+bool ShowLyrics::canBeRun()
+{
+	if (myScreen == myLyrics)
+	{
+		m_song = nullptr;
+		return true;
+	}
+	else
+	{
+		m_song = currentSong(myScreen);
+		return m_song != nullptr;
+	}
 }
 
 void ShowLyrics::run()
 {
-	myLyrics->switchTo();
+	if (m_song != nullptr)
+		myLyrics->fetch(*m_song);
+	if (myScreen == myLyrics || !isVisible(myLyrics))
+		myLyrics->switchTo();
 }
 
 void Quit::run()
@@ -2325,12 +2461,11 @@ void NextScreen::run()
 	}
 	else if (!Config.screen_sequence.empty())
 	{
-		const auto &seq = Config.screen_sequence;
-		auto screen_type = std::find(seq.begin(), seq.end(), myScreen->type());
-		if (++screen_type == seq.end())
-			toScreen(seq.front())->switchTo();
-		else
-			toScreen(*screen_type)->switchTo();
+		auto screen = nextScreenTypeInSequence(
+			Config.screen_sequence.begin(),
+			Config.screen_sequence.end(),
+			myScreen->type());
+		toScreen(*screen)->switchTo();
 	}
 }
 
@@ -2343,12 +2478,11 @@ void PreviousScreen::run()
 	}
 	else if (!Config.screen_sequence.empty())
 	{
-		const auto &seq = Config.screen_sequence;
-		auto screen_type = std::find(seq.begin(), seq.end(), myScreen->type());
-		if (screen_type == seq.begin())
-			toScreen(seq.back())->switchTo();
-		else
-			toScreen(*--screen_type)->switchTo();
+		auto screen = nextScreenTypeInSequence(
+			Config.screen_sequence.rbegin(),
+			Config.screen_sequence.rend(),
+			myScreen->type());
+		toScreen(*screen)->switchTo();
 	}
 }
 
@@ -2563,8 +2697,9 @@ namespace {
 
 void populateActions()
 {
+	AvailableActions.resize(static_cast<size_t>(Actions::Type::_numberOfActions));
 	auto insert_action = [](Actions::BaseAction *a) {
-		AvailableActions[static_cast<size_t>(a->type())] = a;
+		AvailableActions.at(static_cast<size_t>(a->type())).reset(a);
 	};
 	insert_action(new Actions::Dummy());
 	insert_action(new Actions::UpdateEnvironment());
@@ -2581,7 +2716,7 @@ void populateActions()
 	insert_action(new Actions::MoveEnd());
 	insert_action(new Actions::ToggleInterface());
 	insert_action(new Actions::JumpToParentDirectory());
-	insert_action(new Actions::PressEnter());
+	insert_action(new Actions::RunAction());
 	insert_action(new Actions::SelectItem());
 	insert_action(new Actions::SelectRange());
 	insert_action(new Actions::PreviousColumn());
@@ -2607,6 +2742,7 @@ void populateActions()
 	insert_action(new Actions::MoveSelectedItemsDown());
 	insert_action(new Actions::MoveSelectedItemsTo());
 	insert_action(new Actions::Add());
+	insert_action(new Actions::PlayItem());
 	insert_action(new Actions::SeekForward());
 	insert_action(new Actions::SeekBackward());
 	insert_action(new Actions::ToggleDisplayMode());
@@ -2627,6 +2763,7 @@ void populateActions()
 	insert_action(new Actions::ToggleCrossfade());
 	insert_action(new Actions::SetCrossfade());
 	insert_action(new Actions::SetVolume());
+	insert_action(new Actions::EnterDirectory());
 	insert_action(new Actions::EditSong());
 	insert_action(new Actions::EditLibraryTag());
 	insert_action(new Actions::EditLibraryAlbum());
@@ -2650,6 +2787,7 @@ void populateActions()
 	insert_action(new Actions::ClearPlaylist());
 	insert_action(new Actions::SortPlaylist());
 	insert_action(new Actions::ReversePlaylist());
+	insert_action(new Actions::ApplyFilter());
 	insert_action(new Actions::Find());
 	insert_action(new Actions::FindItemForward());
 	insert_action(new Actions::FindItemBackward());
@@ -2664,10 +2802,11 @@ void populateActions()
 	insert_action(new Actions::ToggleBrowserSortMode());
 	insert_action(new Actions::ToggleLibraryTagType());
 	insert_action(new Actions::ToggleMediaLibrarySortMode());
+	insert_action(new Actions::FetchLyricsInBackground());
 	insert_action(new Actions::RefetchLyrics());
 	insert_action(new Actions::SetSelectedItemsPriority());
+	insert_action(new Actions::ToggleOutput());
 	insert_action(new Actions::ToggleVisualizationType());
-	insert_action(new Actions::SetVisualizerSampleMultiplier());
 	insert_action(new Actions::ShowSongInfo());
 	insert_action(new Actions::ShowArtistInfo());
 	insert_action(new Actions::ShowLyrics());
@@ -2688,9 +2827,15 @@ void populateActions()
 	insert_action(new Actions::ShowVisualizer());
 	insert_action(new Actions::ShowClock());
 	insert_action(new Actions::ShowServerInfo());
+	for (size_t i = 0; i < AvailableActions.size(); ++i)
+	{
+		if (AvailableActions[i] == nullptr)
+			throw std::logic_error("undefined action at position "
+			                       + boost::lexical_cast<std::string>(i));
+	}
 }
 
-bool scrollTagCanBeRun(NC::List *&list, SongList *&songs)
+bool scrollTagCanBeRun(NC::List *&list, const SongList *&songs)
 {
 	auto w = myScreen->activeWindow();
 	if (list != static_cast<void *>(w))
@@ -2701,43 +2846,41 @@ bool scrollTagCanBeRun(NC::List *&list, SongList *&songs)
 	    && songs != nullptr;
 }
 
-void scrollTagUpRun(NC::List *list, SongList *songs, MPD::Song::GetFunction get)
+void scrollTagUpRun(NC::List *list, const SongList *songs, MPD::Song::GetFunction get)
 {
 	const auto front = songs->beginS();
 	auto it = songs->currentS();
-	if (auto *s = it->get<Bit::Song>())
+	if (it->song() != nullptr)
 	{
-		const std::string tag = s->getTags(get);
+		const std::string tag = it->song()->getTags(get);
 		while (it != front)
 		{
 			--it;
-			s = it->get<Bit::Song>();
-			if (s == nullptr || s->getTags(get) != tag)
+			if (it->song() == nullptr || it->song()->getTags(get) != tag)
 				break;
 		}
 		list->highlight(it-front);
 	}
 }
 
-void scrollTagDownRun(NC::List *list, SongList *songs, MPD::Song::GetFunction get)
+void scrollTagDownRun(NC::List *list, const SongList *songs, MPD::Song::GetFunction get)
 {
 	const auto front = songs->beginS(), back = --songs->endS();
 	auto it = songs->currentS();
-	if (auto *s = it->get<Bit::Song>())
+	if (it->song() != nullptr)
 	{
-		const std::string tag = s->getTags(get);
+		const std::string tag = it->song()->getTags(get);
 		while (it != back)
 		{
 			++it;
-			s = it->get<Bit::Song>();
-			if (s == nullptr || s->getTags(get) != tag)
+			if (it->song() == nullptr || it->song()->getTags(get) != tag)
 				break;
 		}
 		list->highlight(it-front);
 	}
 }
 
-void seek()
+void seek(SearchDirection sd)
 {
 	using Global::wHeader;
 	using Global::wFooter;
@@ -2755,13 +2898,38 @@ void seek()
 
 	unsigned songpos = Status::State::elapsedTime();
 	auto t = Timer;
+
+	NC::Window::ScopedTimeout stimeout{*wFooter, BaseScreen::defaultWindowTimeout};
 	
-	int old_timeout = wFooter->getTimeout();
-	wFooter->setTimeout(BaseScreen::defaultWindowTimeout);
-	
-	auto seekForward = &Actions::get(Actions::Type::SeekForward);
-	auto seekBackward = &Actions::get(Actions::Type::SeekBackward);
-	
+	// Accept single action of a given type or action chain for which all actions
+	// can be run and one of them is of the given type. This will still not work
+	// in some contrived cases, but allows for more flexibility than accepting
+	// single actions only.
+	auto hasRunnableAction = [](BindingsConfiguration::BindingIteratorPair &bindings,
+	                            Actions::Type type) {
+		bool success = false;
+		for (auto binding = bindings.first; binding != bindings.second; ++binding)
+		{
+			auto &actions = binding->actions();
+			for (const auto &action : actions)
+			{
+				if (action->canBeRun())
+				{
+					if (action->type() == type)
+						success = true;
+				}
+				else
+				{
+					success = false;
+					break;
+				}
+			}
+			if (success)
+				break;
+		}
+		return success;
+	};
+
 	SeekingInProgress = true;
 	while (true)
 	{
@@ -2772,17 +2940,10 @@ void seek()
 		                 : Config.seek_time;
 		
 		NC::Key::Type input = readKey(*wFooter);
-		auto k = Bindings.get(input);
-		if (k.first == k.second || !k.first->isSingle()) // no single action?
-			break;
-		auto a = k.first->action();
-		if (a == seekForward)
+
+		switch (sd)
 		{
-			if (songpos < Status::State::totalTime())
-				songpos = std::min(songpos + howmuch, Status::State::totalTime());
-		}
-		else if (a == seekBackward)
-		{
+		case SearchDirection::Backward:
 			if (songpos > 0)
 			{
 				if (songpos < howmuch)
@@ -2790,11 +2951,13 @@ void seek()
 				else
 					songpos -= howmuch;
 			}
-		}
-		else
 			break;
-		
-		*wFooter << NC::Format::Bold;
+		case SearchDirection::Forward:
+			if (songpos < Status::State::totalTime())
+				songpos = std::min(songpos + howmuch, Status::State::totalTime());
+			break;
+		};
+
 		std::string tracklength;
 		// FIXME: merge this with the code in status.cpp
 		switch (Config.design)
@@ -2811,7 +2974,10 @@ void seek()
 				tracklength += "/";
 				tracklength += MPD::Song::ShowTime(Status::State::totalTime());
 				tracklength += "]";
-				*wFooter << NC::XY(wFooter->getWidth()-tracklength.length(), 1) << tracklength;
+				*wFooter << NC::XY(wFooter->getWidth()-tracklength.length(), 1)
+				         << Config.statusbar_time_color
+				         << tracklength
+				         << NC::FormattedColor::End<>(Config.statusbar_time_color);
 				break;
 			case Design::Alternative:
 				if (Config.display_remaining_time)
@@ -2823,18 +2989,27 @@ void seek()
 					tracklength = MPD::Song::ShowTime(songpos);
 				tracklength += "/";
 				tracklength += MPD::Song::ShowTime(Status::State::totalTime());
-				*wHeader << NC::XY(0, 0) << tracklength << " ";
+				*wHeader << NC::XY(0, 0)
+				         << Config.statusbar_time_color
+				         << tracklength
+				         << NC::FormattedColor::End<>(Config.statusbar_time_color)
+				         << " ";
 				wHeader->refresh();
 				break;
 		}
-		*wFooter << NC::Format::NoBold;
 		Progressbar::draw(songpos, Status::State::totalTime());
 		wFooter->refresh();
+
+		auto k = Bindings.get(input);
+		if (hasRunnableAction(k, Actions::Type::SeekBackward))
+			sd = SearchDirection::Backward;
+		else if (hasRunnableAction(k, Actions::Type::SeekForward))
+			sd = SearchDirection::Forward;
+		else
+			break;
 	}
 	SeekingInProgress = false;
 	Mpd.Seek(Status::State::currentSongPosition(), songpos);
-	
-	wFooter->setTimeout(old_timeout);
 }
 
 void findItem(const SearchDirection direction)
@@ -2845,33 +3020,31 @@ void findItem(const SearchDirection direction)
 	assert(w != nullptr);
 	assert(w->allowsSearching());
 	
-	std::string constraint;
-	{
-		Statusbar::ScopedLock slock;
-		NC::Window::ScopedPromptHook prompt_hook(*wFooter,
-			Statusbar::Helpers::FindImmediately(w, direction)
-		);
-		Statusbar::put() << (boost::format("Find %1%: ") % direction).str();
-		constraint = wFooter->prompt();
-	}
-	
+	std::string constraint = w->searchConstraint();
 	try
 	{
-		if (constraint.empty())
-		{
-			Statusbar::printf("Constraint unset");
-			w->clearConstraint();
-		}
-		else
-		{
-			w->setSearchConstraint(constraint);
-			Statusbar::printf("Using constraint \"%1%\"", constraint);
-		}
+		ScopedValue<bool> disabled_autocenter_mode(Config.autocenter_mode, false);
+		Statusbar::ScopedLock slock;
+		NC::Window::ScopedPromptHook prompt_hook(
+			*wFooter,
+			Statusbar::Helpers::FindImmediately(w, direction));
+		Statusbar::put() << (boost::format("Find %1%: ") % direction).str();
+		constraint = wFooter->prompt(constraint);
 	}
-	catch (boost::bad_expression &e)
+	catch (NC::PromptAborted &)
 	{
-		Statusbar::printf("%1%", e.what());
+		w->setSearchConstraint(constraint);
+		w->search(direction, Config.wrapped_search, false);
+		throw;
 	}
+
+	if (constraint.empty())
+	{
+		Statusbar::printf("Constraint unset");
+		w->clearSearchConstraint();
+	}
+	else
+		Statusbar::printf("Using constraint \"%1%\"", constraint);
 }
 
 void listsChangeFinisher()

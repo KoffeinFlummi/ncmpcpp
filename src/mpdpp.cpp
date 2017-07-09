@@ -1,5 +1,5 @@
 /***************************************************************************
- *   Copyright (C) 2008-2014 by Andrzej Rybczak                            *
+ *   Copyright (C) 2008-2017 by Andrzej Rybczak                            *
  *   electricityispower@gmail.com                                          *
  *                                                                         *
  *   This program is free software; you can redistribute it and/or modify  *
@@ -29,6 +29,16 @@
 MPD::Connection Mpd;
 
 namespace {
+
+const char *mpdDirectory(const std::string &directory)
+{
+	// MPD <= 0.19 accepts "/" for a root directory whereas later
+	// versions do not, so provide a compatibility layer.
+	if (directory == "/")
+		return "";
+	else
+		return directory.c_str();
+}
 
 template <typename ObjectT, typename SourceT>
 std::function<bool(typename MPD::Iterator<ObjectT>::State &)>
@@ -177,6 +187,11 @@ int Connection::noidle()
 		checkErrors();
 	}
 	return flags;
+}
+
+void Connection::setNoidleCallback(NoidleCallback callback)
+{
+	m_noidle_callback = std::move(callback);
 }
 
 Statistics Connection::getStatistics()
@@ -457,6 +472,14 @@ void Connection::SetVolume(unsigned vol)
 	checkErrors();
 }
 
+void Connection::ChangeVolume(int change)
+{
+	prechecksNoCommandsList();
+	mpd_run_change_volume(m_connection.get(), change);
+	checkErrors();
+}
+
+
 std::string Connection::GetReplayGainMode()
 {
 	prechecksNoCommandsList();
@@ -551,7 +574,7 @@ void Connection::Add(const std::string &path)
 	}
 }
 
-bool Connection::AddRandomTag(mpd_tag_type tag, size_t number)
+bool Connection::AddRandomTag(mpd_tag_type tag, size_t number, std::mt19937 &rng)
 {
 	std::vector<std::string> tags(
 		std::make_move_iterator(GetList(tag)),
@@ -560,7 +583,7 @@ bool Connection::AddRandomTag(mpd_tag_type tag, size_t number)
 	if (number > tags.size())
 		return false;
 
-	std::random_shuffle(tags.begin(), tags.end());
+	std::shuffle(tags.begin(), tags.end(), rng);
 	auto it = tags.begin();
 	for (size_t i = 0; i < number && it != tags.end(); ++i)
 	{
@@ -578,7 +601,7 @@ bool Connection::AddRandomTag(mpd_tag_type tag, size_t number)
 	return true;
 }
 
-bool Connection::AddRandomSongs(size_t number)
+bool Connection::AddRandomSongs(size_t number, std::mt19937 &rng)
 {
 	prechecksNoCommandsList();
 	std::vector<std::string> files;
@@ -599,7 +622,7 @@ bool Connection::AddRandomSongs(size_t number)
 	}
 	else
 	{
-		std::random_shuffle(files.begin(), files.end());
+		std::shuffle(files.begin(), files.end(), rng);
 		StartCommandsList();
 		auto it = files.begin();
 		for (size_t i = 0; i < number && it != files.end(); ++i, ++it)
@@ -739,7 +762,7 @@ SongIterator Connection::CommitSearchSongs()
 ItemIterator Connection::GetDirectory(const std::string &directory)
 {
 	prechecksNoCommandsList();
-	mpd_send_list_meta(m_connection.get(), directory.c_str());
+	mpd_send_list_meta(m_connection.get(), mpdDirectory(directory));
 	checkErrors();
 	return ItemIterator(m_connection.get(), defaultFetcher<Item>(mpd_recv_entity));
 }
@@ -747,7 +770,7 @@ ItemIterator Connection::GetDirectory(const std::string &directory)
 SongIterator Connection::GetDirectoryRecursive(const std::string &directory)
 {
 	prechecksNoCommandsList();
-	mpd_send_list_all_meta(m_connection.get(), directory.c_str());
+	mpd_send_list_all_meta(m_connection.get(), mpdDirectory(directory));
 	checkErrors();
 	return SongIterator(m_connection.get(), fetchItemSong);
 }
@@ -755,7 +778,7 @@ SongIterator Connection::GetDirectoryRecursive(const std::string &directory)
 DirectoryIterator Connection::GetDirectories(const std::string &directory)
 {
 	prechecksNoCommandsList();
-	mpd_send_list_meta(m_connection.get(), directory.c_str());
+	mpd_send_list_meta(m_connection.get(), mpdDirectory(directory));
 	checkErrors();
 	return DirectoryIterator(m_connection.get(), defaultFetcher<Directory>(mpd_recv_directory));
 }
@@ -763,7 +786,7 @@ DirectoryIterator Connection::GetDirectories(const std::string &directory)
 SongIterator Connection::GetSongs(const std::string &directory)
 {
 	prechecksNoCommandsList();
-	mpd_send_list_meta(m_connection.get(), directory.c_str());
+	mpd_send_list_meta(m_connection.get(), mpdDirectory(directory));
 	checkErrors();
 	return SongIterator(m_connection.get(), defaultFetcher<Song>(mpd_recv_song));
 }
@@ -836,7 +859,9 @@ void Connection::checkConnection() const
 void Connection::prechecks()
 {
 	checkConnection();
-	noidle();
+	int flags = noidle();
+	if (flags && m_noidle_callback)
+		m_noidle_callback(flags);
 }
 
 void Connection::prechecksNoCommandsList()

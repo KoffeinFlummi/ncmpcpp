@@ -1,5 +1,5 @@
 /***************************************************************************
- *   Copyright (C) 2008-2014 by Andrzej Rybczak                            *
+ *   Copyright (C) 2008-2017 by Andrzej Rybczak                            *
  *   electricityispower@gmail.com                                          *
  *                                                                         *
  *   This program is free software; you can redistribute it and/or modify  *
@@ -19,56 +19,37 @@
  ***************************************************************************/
 
 #include "helpers/song_iterator_maker.h"
-#include "song_info.h"
+#include "screens/song_info.h"
 #include "utility/functional.h"
-
-namespace {
-
-template <bool Const>
-struct SongExtractor
-{
-	typedef SongExtractor type;
-
-	typedef typename NC::Menu<MPD::Song>::Item MenuItem;
-	typedef typename std::conditional<Const, const MenuItem, MenuItem>::type Item;
-	typedef typename std::conditional<Const, const MPD::Song, MPD::Song>::type Song;
-
-	Song *operator()(Item &item) const
-	{
-		return &item.value();
-	}
-};
-
-}
 
 SongIterator SongMenu::currentS()
 {
-	return makeSongIterator_<MPD::Song>(current(), SongExtractor<false>());
+	return makeSongIterator(current());
 }
 
 ConstSongIterator SongMenu::currentS() const
 {
-	return makeConstSongIterator_<MPD::Song>(current(), SongExtractor<true>());
+	return makeConstSongIterator(current());
 }
 
 SongIterator SongMenu::beginS()
 {
-	return makeSongIterator_<MPD::Song>(begin(), SongExtractor<false>());
+	return makeSongIterator(begin());
 }
 
 ConstSongIterator SongMenu::beginS() const
 {
-	return makeConstSongIterator_<MPD::Song>(begin(), SongExtractor<true>());
+	return makeConstSongIterator(begin());
 }
 
 SongIterator SongMenu::endS()
 {
-	return makeSongIterator_<MPD::Song>(end(), SongExtractor<false>());
+	return makeSongIterator(end());
 }
 
 ConstSongIterator SongMenu::endS() const
 {
-	return makeConstSongIterator_<MPD::Song>(end(), SongExtractor<true>());
+	return makeConstSongIterator(end());
 }
 
 std::vector<MPD::Song> SongMenu::getSelectedSongs()

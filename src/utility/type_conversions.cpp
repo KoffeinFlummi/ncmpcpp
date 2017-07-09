@@ -1,5 +1,5 @@
 /***************************************************************************
- *   Copyright (C) 2008-2014 by Andrzej Rybczak                            *
+ *   Copyright (C) 2008-2017 by Andrzej Rybczak                            *
  *   electricityispower@gmail.com                                          *
  *                                                                         *
  *   This program is free software; you can redistribute it and/or modify  *
@@ -18,8 +18,22 @@
  *   51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA.              *
  ***************************************************************************/
 
+#include <boost/lexical_cast.hpp>
 #include <cassert>
 #include "utility/type_conversions.h"
+
+std::string channelsToString(int channels)
+{
+	switch (channels)
+	{
+	case 1:
+		return "Mono";
+	case 2:
+		return "Stereo";
+	default:
+		return boost::lexical_cast<std::string>(channels);
+	}
+}
 
 NC::Color charToColor(char c)
 {
@@ -108,7 +122,7 @@ MPD::MutableSong::SetFunction tagTypeToSetFunction(mpd_tag_type tag)
 		case MPD_TAG_DISC:
 			return &MPD::MutableSong::setDisc;
 		default:
-			return 0;
+			return nullptr;
 	}
 }
 
@@ -183,6 +197,36 @@ MPD::Song::GetFunction charToGetFunction(char c)
 		default:
 			return nullptr;
 	}
+}
+
+boost::optional<mpd_tag_type> getFunctionToTagType(MPD::Song::GetFunction f)
+{
+	if (f == &MPD::Song::getArtist)
+		return MPD_TAG_ARTIST;
+	else if (f == &MPD::Song::getTitle)
+		return MPD_TAG_TITLE;
+	else if (f == &MPD::Song::getAlbum)
+		return MPD_TAG_ALBUM;
+	else if (f == &MPD::Song::getAlbumArtist)
+		return MPD_TAG_ALBUM_ARTIST;
+	else if (f == &MPD::Song::getTrack)
+		return MPD_TAG_TRACK;
+	else if (f == &MPD::Song::getDate)
+		return MPD_TAG_DATE;
+	else if (f == &MPD::Song::getGenre)
+		return MPD_TAG_GENRE;
+	else if (f == &MPD::Song::getComposer)
+		return MPD_TAG_COMPOSER;
+	else if (f == &MPD::Song::getPerformer)
+		return MPD_TAG_PERFORMER;
+	else if (f == &MPD::Song::getComment)
+		return MPD_TAG_COMMENT;
+	else if (f == &MPD::Song::getDisc)
+		return MPD_TAG_DISC;
+	else if (f == &MPD::Song::getComment)
+		return MPD_TAG_COMMENT;
+	else
+		return boost::none;
 }
 
 std::string itemTypeToString(MPD::Item::Type type)

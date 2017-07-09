@@ -1,5 +1,5 @@
 /***************************************************************************
- *   Copyright (C) 2008-2014 by Andrzej Rybczak                            *
+ *   Copyright (C) 2008-2017 by Andrzej Rybczak                            *
  *   electricityispower@gmail.com                                          *
  *                                                                         *
  *   This program is free software; you can redistribute it and/or modify  *
@@ -22,24 +22,24 @@
 #include <netinet/tcp.h>
 #include <netinet/in.h>
 
-#include "browser.h"
+#include "curses/menu_impl.h"
+#include "screens/browser.h"
 #include "charset.h"
 #include "format_impl.h"
 #include "global.h"
 #include "helpers.h"
-#include "lyrics.h"
-#include "media_library.h"
-#include "menu_impl.h"
-#include "outputs.h"
-#include "playlist.h"
-#include "playlist_editor.h"
-#include "search_engine.h"
-#include "sel_items_adder.h"
+#include "screens/lyrics.h"
+#include "screens/media_library.h"
+#include "screens/outputs.h"
+#include "screens/playlist.h"
+#include "screens/playlist_editor.h"
+#include "screens/search_engine.h"
+#include "screens/sel_items_adder.h"
 #include "settings.h"
 #include "status.h"
 #include "statusbar.h"
-#include "tag_editor.h"
-#include "visualizer.h"
+#include "screens/tag_editor.h"
+#include "screens/visualizer.h"
 #include "title.h"
 #include "utility/string.h"
 
@@ -159,7 +159,7 @@ void initialize_status()
 
 	myBrowser->fetchSupportedExtensions();
 #	ifdef ENABLE_OUTPUTS
-	myOutputs->FetchList();
+	myOutputs->fetchList();
 #	endif // ENABLE_OUTPUTS
 #	ifdef ENABLE_VISUALIZER
 	myVisualizer->ResetFD();
@@ -246,7 +246,7 @@ void Status::update(int event)
 	m_playlist_length = st.playlistLength();
 	m_total_time = st.totalTime();
 	m_volume = st.volume();
-	
+
 	if (event & MPD_IDLE_DATABASE)
 		Changes::database();
 	if (event & MPD_IDLE_STORED_PLAYLIST)
@@ -379,6 +379,11 @@ int Status::State::currentSongPosition()
 	return m_current_song_pos;
 }
 
+unsigned Status::State::playlistLength()
+{
+	return m_playlist_length;
+}
+
 unsigned Status::State::elapsedTime()
 {
 	return m_elapsed_time;
@@ -403,54 +408,43 @@ int Status::State::volume()
 
 void Status::Changes::playlist(unsigned previous_version)
 {
-	if (m_playlist_length < myPlaylist->main().size())
 	{
-		auto it = myPlaylist->main().begin()+m_playlist_length;
-		auto end = myPlaylist->main().end();
-		for (; it != end; ++it)
-			myPlaylist->unregisterSong(it->value());
-		myPlaylist->main().resizeList(m_playlist_length);
+		ScopedUnfilteredMenu<MPD::Song> sunfilter(ReapplyFilter::Yes, myPlaylist->main());
+
+		if (m_playlist_length < myPlaylist->main().size())
+		{
+			auto it = myPlaylist->main().begin()+m_playlist_length;
+			auto end = myPlaylist->main().end();
+			for (; it != end; ++it)
+				myPlaylist->unregisterSong(it->value());
+			myPlaylist->main().resizeList(m_playlist_length);
+		}
+
+		MPD::SongIterator s = Mpd.GetPlaylistChanges(previous_version), end;
+		for (; s != end; ++s)
+		{
+			size_t pos = s->getPosition();
+			myPlaylist->registerSong(*s);
+			if (pos < myPlaylist->main().size())
+			{
+				// if song's already in playlist, replace it with a new one
+				MPD::Song &old_s = myPlaylist->main()[pos].value();
+				myPlaylist->unregisterSong(old_s);
+				old_s = std::move(*s);
+			}
+			else // otherwise just add it to playlist
+				myPlaylist->main().addItem(std::move(*s));
+		}
 	}
 
-	MPD::SongIterator s = Mpd.GetPlaylistChanges(previous_version), end;
-	for (; s != end; ++s)
-	{
-		size_t pos = s->getPosition();
-		myPlaylist->registerSong(*s);
-		if (pos < myPlaylist->main().size())
-		{
-			// if song's already in playlist, replace it with a new one
-			MPD::Song &old_s = myPlaylist->main()[pos].value();
-			myPlaylist->unregisterSong(old_s);
-			old_s = std::move(*s);
-		}
-		else // otherwise just add it to playlist
-			myPlaylist->main().addItem(std::move(*s));
-	}
-	
 	myPlaylist->reloadTotalLength();
 	myPlaylist->reloadRemaining();
-	
-	if (isVisible(myBrowser))
-		markSongsInPlaylist(myBrowser->main());
-	if (isVisible(mySearcher))
-		markSongsInPlaylist(mySearcher->main());
-	if (isVisible(myLibrary))
-	{
-		markSongsInPlaylist(myLibrary->Songs);
-		myLibrary->Songs.refresh();
-	}
-	if (isVisible(myPlaylistEditor))
-	{
-		markSongsInPlaylist(myPlaylistEditor->Content);
-		myPlaylistEditor->Content.refresh();
-	}
 }
 
 void Status::Changes::storedPlaylists()
 {
 	myPlaylistEditor->requestPlaylistsUpdate();
-	myPlaylistEditor->requestContentsUpdate();
+	myPlaylistEditor->requestContentUpdate();
 	if (!myBrowser->isLocal() && myBrowser->inRootDirectory())
 		myBrowser->requestUpdate();
 }
@@ -468,6 +462,24 @@ void Status::Changes::database()
 
 void Status::Changes::playerState()
 {
+	if (!Config.execute_on_player_state_change.empty())
+	{
+		auto stateToEnv = [](MPD::PlayerState st) -> const char * {
+			switch (st)
+			{
+			case MPD::psPlay:    return "play";
+			case MPD::psStop:    return "stop";
+			case MPD::psPause:   return "pause";
+			case MPD::psUnknown: return "unknown";
+			}
+			throw std::logic_error("unreachable");
+		};
+		GNUC_UNUSED int res;
+		setenv("MPD_PLAYER_STATE", stateToEnv(m_player_state), 1);
+		res = system(Config.execute_on_player_state_change.c_str());
+		unsetenv("MPD_PLAYER_STATE");
+	}
+
 	switch (m_player_state)
 	{
 		case MPD::psPlay:
@@ -498,7 +510,7 @@ void Status::Changes::playerState()
 		default:
 			break;
 	}
-	
+
 	std::string state = playerStateToString(m_player_state);
 	if (Config.design == Design::Alternative)
 	{
@@ -513,7 +525,7 @@ void Status::Changes::playerState()
 		else
 			*wFooter << NC::Format::Bold << state << NC::Format::NoBold;
 	}
-	
+
 	// needed for immediate display after starting
 	// player from stopped state or seeking
 	elapsedTime(false);
@@ -526,6 +538,9 @@ void Status::Changes::songID(int song_id)
 	playing_song_scroll_begin = 0;
 	first_line_scroll_begin = 0;
 	second_line_scroll_begin = 0;
+#	ifdef ENABLE_VISUALIZER
+	myVisualizer->ResetAutoScaleMultiplier();
+#	endif // ENABLE_VISUALIZER
 	if (m_player_state != MPD::psStop)
 	{
 		auto &pl = myPlaylist->main();
@@ -542,21 +557,18 @@ void Status::Changes::songID(int song_id)
 			if (!Config.execute_on_song_change.empty())
 				res = system(Config.execute_on_song_change.c_str());
 
-#			ifdef HAVE_CURL_CURL_H
 			if (Config.fetch_lyrics_in_background)
-				Lyrics::DownloadInBackground(s);
-#			endif // HAVE_CURL_CURL_H
+				myLyrics->fetchInBackground(s, false);
 
 			drawTitle(s);
 
 			if (Config.autocenter_mode)
-				pl.highlight(Status::State::currentSongPosition());
+				myPlaylist->locateSong(s);
 
-			if (Config.now_playing_lyrics && isVisible(myLyrics) && myLyrics->previousScreen() == myPlaylist)
-			{
-				if (myLyrics->SetSong(s))
-					myLyrics->Reload = 1;
-			}
+			if (Config.now_playing_lyrics
+			    && isVisible(myLyrics)
+			    && myLyrics->previousScreen() == myPlaylist)
+				myLyrics->fetch(s);
 		}
 	}
 	elapsedTime(false);
@@ -569,7 +581,8 @@ void Status::Changes::elapsedTime(bool update_elapsed)
 	{
 		// MPD is not playing, clear statusbar and exit.
 		if (Statusbar::isUnlocked() && Config.statusbar_visibility)
-			*wFooter << NC::XY(0, 1) << NC::TermManip::ClearToEOL;
+			*wFooter << NC::XY(0, 1)
+			         << NC::TermManip::ClearToEOL;
 		return;
 	}
 
@@ -613,9 +626,19 @@ void Status::Changes::elapsedTime(bool update_elapsed)
 				tracklength += "]";
 				NC::WBuffer np_song;
 				Format::print(Config.song_status_wformat, np_song, &np);
-				*wFooter << NC::XY(0, 1) << NC::TermManip::ClearToEOL << NC::Format::Bold << ps << ' ' << NC::Format::NoBold;
-				writeCyclicBuffer(np_song, *wFooter, playing_song_scroll_begin, wFooter->getWidth()-ps.length()-tracklength.length()-2, L" ** ");
-				*wFooter << NC::Format::Bold << NC::XY(wFooter->getWidth()-tracklength.length(), 1) << tracklength << NC::Format::NoBold;
+				*wFooter << NC::XY(0, 1)
+				         << NC::TermManip::ClearToEOL
+				         << Config.player_state_color
+				         << ps
+				         << NC::FormattedColor::End<>(Config.player_state_color)
+				         << " ";
+				writeCyclicBuffer(
+					np_song, *wFooter, playing_song_scroll_begin,
+					wFooter->getWidth()-ps.length()-tracklength.length()-2, L" ** ");
+				*wFooter << NC::XY(wFooter->getWidth()-tracklength.length(), 1)
+				         << Config.statusbar_time_color
+				         << tracklength
+				         << NC::FormattedColor::End<>(Config.statusbar_time_color);
 			}
 			break;
 		case Design::Alternative:
@@ -644,23 +667,41 @@ void Status::Changes::elapsedTime(bool update_elapsed)
 			Format::print(Config.new_header_second_line, second, &np);
 
 			size_t first_len = wideLength(first.str());
-			size_t first_margin = (std::max(tracklength.length()+1, VolumeState.length()))*2;
-			size_t first_start = first_len < COLS-first_margin ? (COLS-first_len)/2 : tracklength.length()+1;
-
+			size_t first_margin = std::max(tracklength.length()+1, VolumeState.length())*2;
+			size_t first_start = first_len < COLS-first_margin
+			                                 ? (COLS-first_len)/2
+			                                 : tracklength.length()+1;
 			size_t second_len = wideLength(second.str());
 			size_t second_margin = (std::max(ps.length(), size_t(8))+1)*2;
-			size_t second_start = second_len < COLS-second_margin ? (COLS-second_len)/2 : ps.length()+1;
-
+			size_t second_start = second_len < COLS-second_margin
+			                                   ? (COLS-second_len)/2
+			                                   : ps.length()+1;
 			if (!Global::SeekingInProgress)
-				*wHeader << NC::XY(0, 0) << NC::TermManip::ClearToEOL << tracklength;
+				*wHeader << NC::XY(0, 0)
+				         << NC::TermManip::ClearToEOL
+				         << Config.statusbar_time_color
+				         << tracklength
+				         << NC::FormattedColor::End<>(Config.statusbar_time_color);
+
 			*wHeader << NC::XY(first_start, 0);
-			writeCyclicBuffer(first, *wHeader, first_line_scroll_begin, COLS-tracklength.length()-VolumeState.length()-1, L" ** ");
 
-			*wHeader << NC::XY(0, 1) << NC::TermManip::ClearToEOL << NC::Format::Bold << ps << NC::Format::NoBold;
-			*wHeader << NC::XY(second_start, 1);
-			writeCyclicBuffer(second, *wHeader, second_line_scroll_begin, COLS-ps.length()-8-2, L" ** ");
+			writeCyclicBuffer(first, *wHeader, first_line_scroll_begin,
+			                  COLS-tracklength.length()-VolumeState.length()-1, L" ** ");
 
-			*wHeader << NC::XY(wHeader->getWidth()-VolumeState.length(), 0) << Config.volume_color << VolumeState << NC::Color::End;
+			*wHeader << NC::XY(0, 1)
+			         << NC::TermManip::ClearToEOL
+			         << Config.player_state_color
+			         << ps
+			         << NC::FormattedColor::End<>(Config.player_state_color)
+			         << NC::XY(second_start, 1);
+
+			writeCyclicBuffer(second, *wHeader, second_line_scroll_begin,
+			                  COLS-ps.length()-8-2, L" ** ");
+
+			*wHeader << NC::XY(wHeader->getWidth()-VolumeState.length(), 0)
+			         << Config.volume_color
+			         << VolumeState
+			         << NC::FormattedColor::End<>(Config.volume_color);
 
 			flags();
 	}
@@ -672,7 +713,7 @@ void Status::Changes::flags()
 {
 	if (!Config.header_visibility && Config.design == Design::Classic)
 		return;
-	
+
 	std::string switch_state;
 	switch (Config.design)
 	{
@@ -690,21 +731,22 @@ void Status::Changes::flags()
 			if (m_db_updating)
 				switch_state += m_db_updating;
 
-			// this is done by raw ncurses because creating another
-			// window only for handling this is quite silly
-			attrset(A_BOLD);
-			color_set(Config.state_line_color.pairNumber(), nullptr);
-			mvhline(1, 0, 0, COLS);
+			*wHeader << Config.state_line_color;
+			mvwhline(wHeader->raw(), 1, 0, 0, COLS);
+			*wHeader << NC::FormattedColor::End<>(Config.state_line_color);
+
 			if (!switch_state.empty())
-			{
-				mvprintw(1, COLS-switch_state.length()-3, "[");
-				color_set(Config.state_flags_color.pairNumber(), nullptr);
-				mvprintw(1, COLS-switch_state.length()-2, "%s", switch_state.c_str());
-				color_set(Config.state_line_color.pairNumber(), nullptr);
-				mvprintw(1, COLS-2, "]");
-			}
-			standend();
-			refresh();
+				*wHeader << NC::XY(COLS-switch_state.length()-3, 1)
+				         << Config.state_line_color
+				         << "["
+				         << NC::FormattedColor::End<>(Config.state_line_color)
+								 << Config.state_flags_color
+								 << switch_state
+				         << NC::FormattedColor::End<>(Config.state_flags_color)
+				         << Config.state_line_color
+								 << "]"
+				         << NC::FormattedColor::End<>(Config.state_line_color);
+
 			break;
 		case Design::Alternative:
 			switch_state += '[';
@@ -715,23 +757,27 @@ void Status::Changes::flags()
 			switch_state += m_crossfade ? m_crossfade : '-';
 			switch_state += m_db_updating ? m_db_updating : '-';
 			switch_state += ']';
-			*wHeader << NC::XY(COLS-switch_state.length(), 1) << NC::Format::Bold << Config.state_flags_color << switch_state << NC::Color::End << NC::Format::NoBold;
+			*wHeader << NC::XY(COLS-switch_state.length(), 1)
+			         << Config.state_flags_color
+			         << switch_state
+			         << NC::FormattedColor::End<>(Config.state_flags_color);
 			if (!Config.header_visibility) // in this case also draw separator
 			{
-				*wHeader << NC::Format::Bold << NC::Color::Black;
+				*wHeader << Config.alternative_ui_separator_color;
 				mvwhline(wHeader->raw(), 2, 0, 0, COLS);
-				*wHeader << NC::Color::End << NC::Format::NoBold;
+				*wHeader << NC::FormattedColor::End<>(Config.alternative_ui_separator_color);
 			}
-			wHeader->refresh();
 			break;
 	}
+	wHeader->refresh();
 }
 
 void Status::Changes::mixer()
 {
-	if (!Config.display_volume_level || (!Config.header_visibility && Config.design == Design::Classic))
+	if (!Config.display_volume_level
+	    || (!Config.header_visibility && Config.design == Design::Classic))
 		return;
-	
+
 	switch (Config.design)
 	{
 		case Design::Classic:
@@ -748,15 +794,18 @@ void Status::Changes::mixer()
 		VolumeState += boost::lexical_cast<std::string>(m_volume);
 		VolumeState += "%";
 	}
-	*wHeader << Config.volume_color;
-	*wHeader << NC::XY(wHeader->getWidth()-VolumeState.length(), 0) << VolumeState;
-	*wHeader << NC::Color::End;
+	*wHeader << NC::XY(wHeader->getWidth()-VolumeState.length(), 0)
+	         << Config.volume_color
+	         << VolumeState
+	         << NC::FormattedColor::End<>(Config.volume_color);
 	wHeader->refresh();
 }
 
 void Status::Changes::outputs()
 {
 #	ifdef ENABLE_OUTPUTS
-	myOutputs->FetchList();
+	myOutputs->fetchList();
+	if (isVisible(myOutputs))
+		myOutputs->refreshWindow();
 #	endif // ENABLE_OUTPUTS
 }

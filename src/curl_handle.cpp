@@ -1,5 +1,5 @@
 /***************************************************************************
- *   Copyright (C) 2008-2014 by Andrzej Rybczak                            *
+ *   Copyright (C) 2008-2017 by Andrzej Rybczak                            *
  *   electricityispower@gmail.com                                          *
  *                                                                         *
  *   This program is free software; you can redistribute it and/or modify  *
@@ -20,10 +20,7 @@
 
 #include "curl_handle.h"
 
-#ifdef HAVE_CURL_CURL_H
-
 #include <cstdlib>
-#include <pthread.h>
 
 namespace
 {
@@ -35,7 +32,7 @@ namespace
 	}
 }
 
-CURLcode Curl::perform(std::string &data, const std::string &URL, const std::string &referer, unsigned timeout)
+CURLcode Curl::perform(std::string &data, const std::string &URL, const std::string &referer, bool follow_redirect, unsigned timeout)
 {
 	CURLcode result;
 	CURL *c = curl_easy_init();
@@ -44,7 +41,11 @@ CURLcode Curl::perform(std::string &data, const std::string &URL, const std::str
 	curl_easy_setopt(c, CURLOPT_WRITEDATA, &data);
 	curl_easy_setopt(c, CURLOPT_CONNECTTIMEOUT, timeout);
 	curl_easy_setopt(c, CURLOPT_NOSIGNAL, 1);
+	// Workaround last.fm SSL certificate problems.
+	curl_easy_setopt(c, CURLOPT_SSL_VERIFYHOST, 0);
 	curl_easy_setopt(c, CURLOPT_USERAGENT, "ncmpcpp " VERSION);
+	if (follow_redirect)
+		curl_easy_setopt(c, CURLOPT_FOLLOWLOCATION, 1L);
 	if (!referer.empty())
 		curl_easy_setopt(c, CURLOPT_REFERER, referer.c_str());
 	result = curl_easy_perform(c);
@@ -59,6 +60,3 @@ std::string Curl::escape(const std::string &s)
 	curl_free(cs);
 	return result;
 }
-
-#endif // HAVE_CURL_CURL_H
-

@@ -1,5 +1,5 @@
 /***************************************************************************
- *   Copyright (C) 2008-2014 by Andrzej Rybczak                            *
+ *   Copyright (C) 2008-2017 by Andrzej Rybczak                            *
  *   electricityispower@gmail.com                                          *
  *                                                                         *
  *   This program is free software; you can redistribute it and/or modify  *
@@ -23,17 +23,16 @@
 
 #include <cassert>
 #include "actions.h"
-#include "screen_type.h"
+#include "screens/screen_type.h"
 
 namespace Actions {
 
 struct PushCharacters: BaseAction
 {
-	PushCharacters(NC::Window **w, std::vector<NC::Key::Type> &&queue)
-	: BaseAction(Type::MacroUtility, ""), m_window(w), m_queue(queue) { }
-	
+	PushCharacters(NC::Window **w, std::vector<NC::Key::Type> &&queue);
+
 private:
-	virtual void run() OVERRIDE;
+	virtual void run() override;
 	
 	NC::Window **m_window;
 	std::vector<NC::Key::Type> m_queue;
@@ -41,35 +40,32 @@ private:
 
 struct RequireRunnable: BaseAction
 {
-	RequireRunnable(BaseAction *action)
-	: BaseAction(Type::MacroUtility, ""), m_action(action) { assert(action); }
+	RequireRunnable(std::shared_ptr<BaseAction> action);
 	
 private:
-	virtual bool canBeRun() OVERRIDE;
-	virtual void run() OVERRIDE { }
+	virtual bool canBeRun() override;
+	virtual void run() override { }
 	
-	BaseAction *m_action;
+	std::shared_ptr<BaseAction> m_action;
 };
 
 struct RequireScreen: BaseAction
 {
-	RequireScreen(ScreenType screen_type)
-	: BaseAction(Type::MacroUtility, ""), m_screen_type(screen_type) { }
+	RequireScreen(ScreenType screen_type);
 	
 private:
-	virtual bool canBeRun() OVERRIDE;
-	virtual void run() OVERRIDE { }
+	virtual bool canBeRun() override;
+	virtual void run() override { }
 	
 	ScreenType m_screen_type;
 };
 
 struct RunExternalCommand: BaseAction
 {
-	RunExternalCommand(std::string command)
-	: BaseAction(Type::MacroUtility, ""), m_command(command) { }
+	RunExternalCommand(std::string &&command);
 	
 private:
-	virtual void run() OVERRIDE;
+	virtual void run() override;
 	
 	std::string m_command;
 };

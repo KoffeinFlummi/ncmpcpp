@@ -1,5 +1,5 @@
 /***************************************************************************
- *   Copyright (C) 2008-2014 by Andrzej Rybczak                            *
+ *   Copyright (C) 2008-2017 by Andrzej Rybczak                            *
  *   electricityispower@gmail.com                                          *
  *                                                                         *
  *   This program is free software; you can redistribute it and/or modify  *
@@ -26,12 +26,21 @@
 #include <iostream>
 #include <memory>
 
+#include "curses/window.h"
 #include "song.h"
 #include "utility/type_conversions.h"
 #include "utility/wide_string.h"
-#include "window.h"
 
 namespace {
+
+// Prepend '0' if the tag is a single digit number so that we get "expected"
+// sort order with regular string comparison.
+void format_numeric_tag(std::string &s)
+{
+	if ((s.length() == 1 && s[0] != '0')
+	    || (s.length() > 3 && s[1] == '/'))
+		s = "0"+s;
+}
 
 size_t calc_hash(const char *s, size_t seed = 0)
 {
@@ -45,6 +54,8 @@ size_t calc_hash(const char *s, size_t seed = 0)
 namespace MPD {
 
 std::string Song::TagsSeparator = " | ";
+
+bool Song::ShowDuplicateTags = true;
 
 std::string Song::get(mpd_tag_type type, unsigned idx) const
 {
@@ -129,9 +140,7 @@ std::string Song::getTrack(unsigned idx) const
 {
 	assert(m_song);
 	std::string track = get(MPD_TAG_TRACK, idx);
-	if ((track.length() == 1 && track[0] != '0')
-	||  (track.length() > 3  && track[1] == '/'))
-		track = "0"+track;
+	format_numeric_tag(track);
 	return track;
 }
 
@@ -172,7 +181,9 @@ std::string Song::getPerformer(unsigned idx) const
 std::string Song::getDisc(unsigned idx) const
 {
 	assert(m_song);
-	return get(MPD_TAG_DISC, idx);
+	std::string disc = get(MPD_TAG_DISC, idx);
+	format_numeric_tag(disc);
+	return disc;
 }
 
 std::string Song::getComment(unsigned idx) const
@@ -206,11 +217,38 @@ std::string MPD::Song::getTags(GetFunction f) const
 	assert(m_song);
 	unsigned idx = 0;
 	std::string result;
-	for (std::string tag; !(tag = (this->*f)(idx)).empty(); ++idx)
+	if (ShowDuplicateTags)
 	{
-		if (!result.empty())
-			result += TagsSeparator;
-		result += tag;
+		for (std::string tag; !(tag = (this->*f)(idx)).empty(); ++idx)
+		{
+			if (!result.empty())
+				result += TagsSeparator;
+			result += tag;
+		}
+	}
+	else
+	{
+		bool already_present;
+		// This is O(n^2), but it doesn't really matter as a list of tags will have
+		// at most 2 or 3 items the vast majority of time.
+		for (std::string tag; !(tag = (this->*f)(idx)).empty(); ++idx)
+		{
+			already_present = false;
+			for (unsigned i = 0; i < idx; ++i)
+			{
+				if ((this->*f)(i) == tag)
+				{
+					already_present = true;
+					break;
+				}
+			}
+			if (!already_present)
+			{
+				if (idx > 0)
+					result += TagsSeparator;
+				result += tag;
+			}
+		}
 	}
 	return result;
 }

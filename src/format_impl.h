@@ -1,5 +1,5 @@
 /***************************************************************************
- *   Copyright (C) 2008-2014 by Andrzej Rybczak                            *
+ *   Copyright (C) 2008-2017 by Andrzej Rybczak                            *
  *   electricityispower@gmail.com                                          *
  *                                                                         *
  *   This program is free software; you can redistribute it and/or modify  *
@@ -23,10 +23,10 @@
 
 #include <boost/variant.hpp>
 
+#include "curses/menu.h"
+#include "curses/strbuffer.h"
 #include "format.h"
-#include "menu.h"
 #include "song.h"
-#include "strbuffer.h"
 #include "utility/functional.h"
 #include "utility/wide_string.h"
 
@@ -124,20 +124,22 @@ struct Printer: boost::static_visitor<Result>
 		{
 			if (st.delimiter() > 0)
 			{
-				// shorten length by chopping off the tail
-				if (st.function() == &MPD::Song::getLength)
+				// shorten date/length by simple truncation
+				if (st.function() == &MPD::Song::getDate
+				    || st.function() == &MPD::Song::getLength)
 					tags.resize(st.delimiter());
 				else
 					tags = wideShorten(tags, st.delimiter());
 			}
-			output(tags);
+			output(tags, &st);
 			return Result::Ok;
 		}
 		else
 			return Result::Missing;
 	}
 
-	// If all Empty -> Empty, if any Ok -> continue with Ok, if any Missing -> stop with Empty.
+	// If all Empty -> Empty, if any Ok -> continue with Ok, if any Missing ->
+	// stop with Empty.
 	Result operator()(const Group<CharT> &group)
 	{
 		auto visit = [this, &group] {
@@ -177,10 +179,11 @@ private:
 	// generic version for streams (buffers, menus)
 	template <typename ValueT, typename OutputStreamT>
 	struct output_ {
-		static void exec(OutputStreamT &os, const ValueT &value) {
+		static void exec(OutputStreamT &os, const ValueT &value, const SongTag *) {
 			os << value;
 		}
 	};
+
 	// specialization for strings (input/output)
 	template <typename SomeCharT, typename OtherCharT>
 	struct output_<std::basic_string<SomeCharT>, std::basic_string<OtherCharT>> {
@@ -191,28 +194,52 @@ private:
 		static typename std::enable_if<
 			std::is_same<SomeString, OtherString>::value,
 			void
-		>::type exec(SomeString &result, const OtherString &s) {
+		>::type exec(SomeString &result, const OtherString &s, const SongTag *) {
 			result += s;
 		}
 	};
-	// when writing to a string, we should ignore all other
-	// properties. if this code is reached, throw an exception.
+	// When writing to a string, we should ignore all other properties. If this
+	// code is reached, throw an exception.
 	template <typename ValueT, typename SomeCharT>
 	struct output_<ValueT, std::basic_string<SomeCharT>> {
-		static void exec(std::basic_string<CharT> &, const ValueT &) {
+		static void exec(std::basic_string<CharT> &, const ValueT &, const SongTag *) {
 			throw std::logic_error("non-string property can't be appended to the string");
 		}
 	};
 
+	// Specialization for TagVector.
+	template <typename SomeCharT, typename OtherCharT>
+	struct output_<std::basic_string<SomeCharT>, TagVector<OtherCharT> > {
+		// Compile only if string types are the same.
+		static typename std::enable_if<
+			std::is_same<SomeCharT, OtherCharT>::value,
+			void
+		>::type exec(TagVector<OtherCharT> &acc,
+		             const std::basic_string<SomeCharT> &s, const SongTag *st) {
+			if (st != nullptr)
+				acc.emplace_back(*st, s);
+			else
+				acc.emplace_back(boost::none, s);
+		}
+	};
+	// When extracting tags from a song all the other properties should be
+	// ignored. If that's not the case, throw an exception.
+	template <typename ValueT, typename SomeCharT>
+	struct output_<ValueT, TagVector<SomeCharT> > {
+		static void exec(TagVector<SomeCharT> &, const ValueT &, const SongTag *) {
+			throw std::logic_error("Non-string property can't be inserted into the TagVector");
+		}
+	};
+
 	template <typename ValueT>
-	void output(const ValueT &value) const
+	void output(const ValueT &value, const SongTag *st = nullptr) const
 	{
 		if (!m_no_output)
 		{
 			if (m_output_switched && m_second_os != nullptr)
-				output_<ValueT, SecondOutputT>::exec(*m_second_os, value);
+				output_<ValueT, SecondOutputT>::exec(*m_second_os, value, st);
 			else
-				output_<ValueT, OutputT>::exec(m_output, value);
+				output_<ValueT, OutputT>::exec(m_output, value, st);
 		}
 	}
 
@@ -254,6 +281,15 @@ std::basic_string<CharT> stringify(const AST<CharT> &ast, const MPD::Song *song)
 {
 	std::basic_string<CharT> result;
 	Printer<CharT, std::basic_string<CharT>> printer(result, song, &result, Flags::Tag);
+	visit(printer, ast);
+	return result;
+}
+
+template <typename CharT>
+TagVector<CharT> flatten(const AST<CharT> &ast, const MPD::Song &song)
+{
+	TagVector<CharT> result;
+	Printer<CharT, TagVector<CharT>> printer(result, &song, &result, Flags::Tag);
 	visit(printer, ast);
 	return result;
 }

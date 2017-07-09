@@ -1,5 +1,5 @@
 /***************************************************************************
- *   Copyright (C) 2008-2014 by Andrzej Rybczak                            *
+ *   Copyright (C) 2008-2017 by Andrzej Rybczak                            *
  *   electricityispower@gmail.com                                          *
  *                                                                         *
  *   This program is free software; you can redistribute it and/or modify  *
@@ -96,12 +96,14 @@ struct Song
 	{
 		return !(operator==(rhs));
 	}
-	
+
 	const char *c_uri() const { return m_song ? mpd_song_get_uri(m_song.get()) : ""; }
 
 	static std::string ShowTime(unsigned length);
 
 	static std::string TagsSeparator;
+
+	static bool ShowDuplicateTags;
 
 private:
 	std::shared_ptr<mpd_song> m_song;

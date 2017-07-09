@@ -1,5 +1,5 @@
 /***************************************************************************
- *   Copyright (C) 2008-2014 by Andrzej Rybczak                            *
+ *   Copyright (C) 2008-2017 by Andrzej Rybczak                            *
  *   electricityispower@gmail.com                                          *
  *                                                                         *
  *   This program is free software; you can redistribute it and/or modify  *
@@ -22,10 +22,10 @@
 #define NCMPCPP_STATUSBAR_H
 
 #include <boost/format.hpp>
+#include "curses/window.h"
 #include "settings.h"
 #include "gcc.h"
 #include "interfaces.h"
-#include "window.h"
 
 namespace Progressbar {
 
@@ -69,8 +69,8 @@ void mpd();
 /// called each time user types another character while inside Window::getString
 bool mainHook(const char *);
 
-/// prompt and return one of the strings specified in the vector
-std::string promptReturnOneOf(std::vector<std::string> values);
+/// prompt and return one of the characters specified in the vector
+char promptReturnOneOf(const std::vector<char> &values);
 
 struct ImmediatelyReturnOneOf
 {
@@ -89,10 +89,22 @@ private:
 	std::vector<std::string> m_values;
 };
 
+struct ApplyFilterImmediately
+{
+	ApplyFilterImmediately(Filterable *w)
+		: m_w(w)
+	{ }
+
+	bool operator()(const char *s);
+
+private:
+	Filterable *m_w;
+};
+
 struct FindImmediately
 {
 	FindImmediately(Searchable *w, SearchDirection direction)
-	: m_w(w), m_direction(direction), m_found(true)
+		: m_w(w), m_direction(direction)
 	{ }
 
 	bool operator()(const char *s);
@@ -100,8 +112,6 @@ struct FindImmediately
 private:
 	Searchable *m_w;
 	const SearchDirection m_direction;
-	std::string m_s;
-	bool m_found;
 };
 
 struct TryExecuteImmediateCommand

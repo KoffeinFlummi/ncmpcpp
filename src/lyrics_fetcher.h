@@ -1,5 +1,5 @@
 /***************************************************************************
- *   Copyright (C) 2008-2014 by Andrzej Rybczak                            *
+ *   Copyright (C) 2008-2017 by Andrzej Rybczak                            *
  *   electricityispower@gmail.com                                          *
  *                                                                         *
  *   This program is free software; you can redistribute it and/or modify  *
@@ -23,39 +23,48 @@
 
 #include "config.h"
 
-#ifdef HAVE_CURL_CURL_H
-
+#include <memory>
 #include <string>
 
 struct LyricsFetcher
 {
 	typedef std::pair<bool, std::string> Result;
-	
-	virtual const char *name() = 0;
+
+	virtual ~LyricsFetcher() { }
+
+	virtual const char *name() const = 0;
 	virtual Result fetch(const std::string &artist, const std::string &title);
 	
 protected:
-	virtual const char *urlTemplate() = 0;
-	virtual const char *regex() = 0;
+	virtual const char *urlTemplate() const = 0;
+	virtual const char *regex() const = 0;
 	
-	virtual bool notLyrics(const std::string &) { return false; }
-	virtual void postProcess(std::string &data);
+	virtual bool notLyrics(const std::string &) const { return false; }
+	virtual void postProcess(std::string &data) const;
 	
 	std::vector<std::string> getContent(const char *regex, const std::string &data);
 	
 	static const char msgNotFound[];
 };
 
+typedef std::unique_ptr<LyricsFetcher> LyricsFetcher_;
+
+typedef std::vector<LyricsFetcher_> LyricsFetchers;
+
+std::istream &operator>>(std::istream &is, LyricsFetcher_ &fetcher);
+
+/**********************************************************************/
+
 struct LyricwikiFetcher : public LyricsFetcher
 {
-	virtual const char *name() { return "lyricwiki.com"; }
-	virtual Result fetch(const std::string &artist, const std::string &title);
+	virtual const char *name() const override { return "lyricwiki.com"; }
+	virtual Result fetch(const std::string &artist, const std::string &title) override;
 	
 protected:
-	virtual const char *urlTemplate() { return "http://lyrics.wikia.com/api.php?action=lyrics&fmt=xml&func=getSong&artist=%artist%&song=%title%"; }
-	virtual const char *regex() { return "<url>(.*?)</url>"; }
+	virtual const char *urlTemplate() const override { return "http://lyrics.wikia.com/api.php?action=lyrics&fmt=xml&func=getSong&artist=%artist%&song=%title%"; }
+	virtual const char *regex() const override { return "<url>(.*?)</url>"; }
 	
-	virtual bool notLyrics(const std::string &data);
+	virtual bool notLyrics(const std::string &data) const override;
 };
 
 /**********************************************************************/
@@ -65,8 +74,8 @@ struct GoogleLyricsFetcher : public LyricsFetcher
 	virtual Result fetch(const std::string &artist, const std::string &title);
 	
 protected:
-	virtual const char *urlTemplate() { return URL; }
-	virtual const char *siteKeyword() { return name(); }
+	virtual const char *urlTemplate() const { return URL; }
+	virtual const char *siteKeyword() const { return name(); }
 	
 	virtual bool isURLOk(const std::string &url);
 	
@@ -76,66 +85,91 @@ private:
 
 struct MetrolyricsFetcher : public GoogleLyricsFetcher
 {
-	virtual const char *name() { return "metrolyrics.com"; }
+	virtual const char *name() const override { return "metrolyrics.com"; }
 	
 protected:
-	virtual const char *regex() { return "<div id=\"lyrics-body\">(.*?)</div>"; }
+	virtual const char *regex() const override { return "<div class=\"lyrics-body\">(.*?)</div>"; }
 	
-	virtual bool isURLOk(const std::string &url);
-	virtual void postProcess(std::string &data);
+	virtual bool isURLOk(const std::string &url) override;
 };
 
 struct LyricsmaniaFetcher : public GoogleLyricsFetcher
 {
-	virtual const char *name() { return "lyricsmania.com"; }
+	virtual const char *name() const override { return "lyricsmania.com"; }
 	
 protected:
-	virtual const char *regex() { return "<div class=\"lyrics-body\".*?</strong>(.*?)</div>"; }
+	virtual const char *regex() const override { return "<div class=\"lyrics-body\".*?</strong>(.*?)</div>"; }
 };
 
 struct Sing365Fetcher : public GoogleLyricsFetcher
 {
-	virtual const char *name() { return "sing365.com"; }
+	virtual const char *name() const override { return "sing365.com"; }
 	
 protected:
-	virtual const char *regex() { return "<script src=\"//srv.tonefuse.com/showads/showad.js\"></script>(.*?)<script>\n/\\* Sing365 - Below Lyrics"; }
-
-	virtual void postProcess(std::string &data);
+	virtual const char *regex() const override { return "<div class=\"content\">.*?</script>(.*?)<script>"; }
 };
 
 struct JustSomeLyricsFetcher : public GoogleLyricsFetcher
 {
-	virtual const char *name() { return "justsomelyrics.com"; }
+	virtual const char *name() const override { return "justsomelyrics.com"; }
 	
 protected:
-	virtual const char *regex() { return "<div class=\"core-left\">(.*?)</div>"; }
+	virtual const char *regex() const override { return "<div class=\"content.*?</div>(.*?)See also"; }
 };
 
 struct AzLyricsFetcher : public GoogleLyricsFetcher
 {
-	virtual const char *name() { return "azlyrics.com"; }
+	virtual const char *name() const override { return "azlyrics.com"; }
 	
 protected:
-	virtual const char *regex() { return "<!-- start of lyrics -->(.*?)<!-- end of lyrics -->"; }
+	virtual const char *regex() const override { return "<div class=\"lyricsh\">.*?</h2>.*<div>(.*?)</div>"; }
+};
+
+struct GeniusFetcher : public GoogleLyricsFetcher
+{
+	virtual const char *name() const override { return "genius.com"; }
+
+protected:
+	virtual const char *regex() const override { return "<div class=\"lyrics\">(.*?)</div>"; }
+};
+
+struct JahLyricsFetcher : public GoogleLyricsFetcher
+{
+	virtual const char *name() const override { return "jah-lyrics.com"; }
+
+protected:
+	virtual const char *regex() const override { return "<div class=\"song-header\">.*?</div>(.*?)<p class=\"disclaimer\">"; }
+};
+
+struct PLyricsFetcher : public GoogleLyricsFetcher
+{
+	virtual const char *name() const override { return "plyrics.com"; }
+
+protected:
+	virtual const char *regex() const override { return "<!-- start of lyrics -->(.*?)<!-- end of lyrics -->"; }
+};
+
+struct TekstowoFetcher : public GoogleLyricsFetcher
+{
+	virtual const char *name() const override { return "tekstowo.pl"; }
+
+protected:
+	virtual const char *regex() const override { return "<div class=\"song-text\">.*?</h2>(.*?)<a"; }
 };
 
 struct InternetLyricsFetcher : public GoogleLyricsFetcher
 {
-	virtual const char *name() { return "the Internet"; }
-	virtual Result fetch(const std::string &artist, const std::string &title);
+	virtual const char *name() const override { return "the Internet"; }
+	virtual Result fetch(const std::string &artist, const std::string &title) override;
 	
 protected:
-	virtual const char *siteKeyword() { return "lyrics"; }
-	virtual const char *regex() { return ""; }
+	virtual const char *siteKeyword() const override { return nullptr; }
+	virtual const char *regex() const override { return ""; }
 	
-	virtual bool isURLOk(const std::string &url);
+	virtual bool isURLOk(const std::string &url) override;
 	
 private:
 	std::string URL;
 };
-
-extern LyricsFetcher *lyricsPlugins[];
-
-#endif // HAVE_CURL_CURL_H
 
 #endif // NCMPCPP_LYRICS_FETCHER_H

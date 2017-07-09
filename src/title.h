@@ -1,5 +1,5 @@
 /***************************************************************************
- *   Copyright (C) 2008-2014 by Andrzej Rybczak                            *
+ *   Copyright (C) 2008-2017 by Andrzej Rybczak                            *
  *   electricityispower@gmail.com                                          *
  *                                                                         *
  *   This program is free software; you can redistribute it and/or modify  *
@@ -21,7 +21,7 @@
 #ifndef NCMPCPP_TITLE_H
 #define NCMPCPP_TITLE_H
 
-#include "window.h"
+#include "curses/window.h"
 
 void windowTitle(const std::string &title);
 

@@ -1,7 +1,8 @@
-##########################################################
-## this is example bindings configuration file, copy it ##
-## to ~/.ncmpcpp/bindings and set up your preferences   ##
-##########################################################
+##############################################################
+## This is the example bindings file. Copy it to            ##
+## ~/.ncmpcpp/bindings or $XDG_CONFIG_HOME/ncmpcpp/bindings ##
+## and set up your preferences                              ##
+##############################################################
 ##
 ##### General rules #####
 ##
@@ -154,7 +155,15 @@
 #def_key "up"
 #  scroll_up
 #
+#def_key "shift-up"
+#  select_item
+#  scroll_up
+#
 #def_key "down"
+#  scroll_down
+#
+#def_key "shift-down"
+#  select_item
 #  scroll_down
 #
 #def_key "["
@@ -185,7 +194,16 @@
 #  select_item
 #
 #def_key "enter"
-#  press_enter
+#  enter_directory
+#
+#def_key "enter"
+#  toggle_output
+#
+#def_key "enter"
+#  run_action
+#
+#def_key "enter"
+#  play_item
 #
 #def_key "space"
 #  add_item_to_playlist
@@ -364,6 +382,9 @@
 #def_key "ctrl-r"
 #  reverse_playlist
 #
+#def_key "ctrl-f"
+#  apply_filter
+#
 #def_key "ctrl-_"
 #  select_found_items
 #
@@ -451,9 +472,6 @@
 #def_key "m"
 #  move_selected_items_up
 #
-#def_key "m"
-#  set_visualizer_sample_multiplier
-#
 #def_key "n"
 #  move_sort_order_down
 #
@@ -500,6 +518,9 @@
 #  toggle_lyrics_fetcher
 #
 #def_key "F"
+#  fetch_lyrics_in_background
+#
+#def_key "alt-l"
 #  toggle_fetching_lyrics_in_background
 #
 #def_key "ctrl-l"

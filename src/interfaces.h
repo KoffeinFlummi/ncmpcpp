@@ -1,5 +1,5 @@
 /***************************************************************************
- *   Copyright (C) 2008-2014 by Andrzej Rybczak                            *
+ *   Copyright (C) 2008-2017 by Andrzej Rybczak                            *
  *   electricityispower@gmail.com                                          *
  *                                                                         *
  *   This program is free software; you can redistribute it and/or modify  *
@@ -26,20 +26,36 @@
 #include <string>
 #include "enums.h"
 #include "gcc.h"
-#include "screen.h"
+#include "screens/screen.h"
 #include "song.h"
 
 struct Searchable
 {
 	virtual bool allowsSearching() = 0;
+
+	virtual const std::string &searchConstraint() = 0;
 	virtual void setSearchConstraint(const std::string &constraint) = 0;
-	virtual void clearConstraint() = 0;
-	virtual bool find(SearchDirection direction, bool wrap, bool skip_current) = 0;
+	virtual void clearSearchConstraint() = 0;
+	virtual bool search(SearchDirection direction, bool wrap, bool skip_current) = 0;
+};
+
+struct Filterable
+{
+	virtual bool allowsFiltering() = 0;
+	virtual std::string currentFilter() = 0;
+	virtual void applyFilter(const std::string &constraint) = 0;
+};
+
+struct HasActions
+{
+	virtual bool actionRunnable() = 0;
+	virtual void runAction() = 0;
 };
 
 struct HasSongs
 {
-	virtual bool addItemToPlaylist() = 0;
+	virtual bool itemAvailable() = 0;
+	virtual bool addItemToPlaylist(bool play) = 0;
 	virtual std::vector<MPD::Song> getSelectedSongs() = 0;
 };
 

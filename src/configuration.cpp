@@ -1,5 +1,5 @@
 /***************************************************************************
- *   Copyright (C) 2008-2014 by Andrzej Rybczak                            *
+ *   Copyright (C) 2008-2017 by Andrzej Rybczak                            *
  *   electricityispower@gmail.com                                          *
  *                                                                         *
  *   This program is free software; you can redistribute it and/or modify  *
@@ -19,14 +19,18 @@
  ***************************************************************************/
 
 #include <algorithm>
+#include <boost/algorithm/string/trim.hpp>
 #include <boost/filesystem/operations.hpp>
 #include <boost/program_options.hpp>
+#include <iomanip>
 #include <iostream>
+#include <fstream>
 
 #include "bindings.h"
 #include "configuration.h"
 #include "config.h"
 #include "mpdpp.h"
+#include "format_impl.h"
 #include "settings.h"
 #include "utility/string.h"
 
@@ -70,26 +74,42 @@ bool configure(int argc, char **argv)
 		xdg_config_home() + "ncmpcpp/config"
 	};
 
-	std::string bindings_path;
+	const std::vector<std::string> default_bindings_paths = {
+		"~/.ncmpcpp/bindings",
+		xdg_config_home() + "ncmpcpp/bindings"
+	};
+
+	std::vector<std::string> bindings_paths;
 	std::vector<std::string> config_paths;
 
 	po::options_description options("Options");
 	options.add_options()
-		("host,h", po::value<std::string>()->default_value("localhost"), "connect to server at host")
-		("port,p", po::value<int>()->default_value(6600), "connect to server at port")
-		("config,c", po::value<std::vector<std::string>>(&config_paths)->default_value(default_config_paths, join<std::string>(default_config_paths, " AND ")), "specify configuration file(s)")
-		("ignore-config-errors", po::value<bool>()->default_value(false), "ignore unknown and invalid options in configuration files")
-		("bindings,b", po::value<std::string>(&bindings_path)->default_value("~/.ncmpcpp/bindings"), "specify bindings file")
-		("screen,s", po::value<std::string>(), "specify initial screen")
-		("slave-screen,S", po::value<std::string>(), "specify initial slave screen")
+		("host,h", po::value<std::string>()->value_name("HOST")->default_value("localhost"), "connect to server at host")
+		("port,p", po::value<int>()->value_name("PORT")->default_value(6600), "connect to server at port")
+		("current-song", po::value<std::string>()->value_name("FORMAT")->implicit_value("{{{(%l) }{{%a - }%t}}|{%f}}"), "print current song using given format and exit")
+		("config,c", po::value<std::vector<std::string>>(&config_paths)->value_name("PATH")->default_value(default_config_paths, join<std::string>(default_config_paths, " AND ")), "specify configuration file(s)")
+		("ignore-config-errors", "ignore unknown and invalid options in configuration files")
+		("test-lyrics-fetchers", "check if lyrics fetchers work")
+		("bindings,b", po::value<std::vector<std::string>>(&bindings_paths)->value_name("PATH")->default_value(default_bindings_paths, join<std::string>(default_bindings_paths, " AND ")), "specify bindings file(s)")
+		("screen,s", po::value<std::string>()->value_name("SCREEN"), "specify the startup screen")
+		("slave-screen,S", po::value<std::string>()->value_name("SCREEN"), "specify the startup slave screen")
 		("help,?", "show help message")
 		("version,v", "display version information")
+		("quiet,q", "suppress logs and excess output")
 	;
 
 	po::variables_map vm;
 	try
 	{
 		po::store(po::parse_command_line(argc, argv, options), vm);
+
+		// suppress messages from std::clog
+		if (vm.count("quiet"))
+		{
+			std::ofstream null_stream;
+			null_stream.open("/dev/null");
+			std::clog.rdbuf(null_stream.rdbuf());
+		}
 
 		if (vm.count("help"))
 		{
@@ -103,9 +123,6 @@ bool configure(int argc, char **argv)
 	#		ifdef HAVE_TAGLIB_H
 			<< " - tag editor\n"
 			<< " - tiny tag editor\n"
-	#		endif
-	#		ifdef HAVE_CURL_CURL_H
-			<< " - artist info\n"
 	#		endif
 	#		ifdef ENABLE_OUTPUTS
 			<< " - outputs\n"
@@ -123,9 +140,6 @@ bool configure(int argc, char **argv)
 			<< "disabled"
 	#		endif // HAVE_LANGINFO_H
 			<< "\nbuilt with support for:"
-	#		ifdef HAVE_CURL_CURL_H
-			<< " curl"
-	#		endif
 	#		ifdef HAVE_FFTW3_H
 			<< " fftw"
 	#		endif
@@ -133,14 +147,41 @@ bool configure(int argc, char **argv)
 	#		ifdef HAVE_TAGLIB_H
 			<< " taglib"
 	#		endif
-	#		ifdef NCMPCPP_UNICODE
-			<< " unicode"
-	#		endif
 			<< "\n";
 			return false;
 		}
 
 		po::notify(vm);
+
+		if (vm.count("test-lyrics-fetchers"))
+		{
+			std::vector<std::tuple<std::string, std::string, std::string>> fetcher_data = {
+				std::make_tuple("lyricwiki", "rihanna", "umbrella"),
+				std::make_tuple("azlyrics", "rihanna", "umbrella"),
+				std::make_tuple("genius", "rihanna", "umbrella"),
+				std::make_tuple("sing365", "rihanna", "umbrella"),
+				std::make_tuple("lyricsmania", "rihanna", "umbrella"),
+				std::make_tuple("metrolyrics", "rihanna", "umbrella"),
+				std::make_tuple("justsomelyrics", "rihanna", "umbrella"),
+				std::make_tuple("jahlyrics", "sean kingston", "dry your eyes"),
+				std::make_tuple("plyrics", "offspring", "genocide"),
+				std::make_tuple("tekstowo", "rihanna", "umbrella"),
+			};
+			for (auto &data : fetcher_data)
+			{
+				auto fetcher = boost::lexical_cast<LyricsFetcher_>(std::get<0>(data));
+				std::cout << std::setw(20)
+				          << std::left
+				          << fetcher->name()
+				          << " : "
+				          << std::flush;
+				auto result = fetcher->fetch(std::get<1>(data), std::get<2>(data));
+				std::cout << (result.first ? "ok" : "failed")
+				          << "\n";
+			}
+			exit(0);
+		}
+
 		// get home directory
 		env_home = getenv("HOME");
 		if (env_home == nullptr)
@@ -151,17 +192,12 @@ bool configure(int argc, char **argv)
 
 		// read configuration
 		std::for_each(config_paths.begin(), config_paths.end(), expand_home);
-		if (Config.read(config_paths, vm["ignore-config-errors"].as<bool>()) == false)
+		if (Config.read(config_paths, vm.count("ignore-config-errors")) == false)
 			exit(1);
 
-		// if bindings file was not specified, use the one from main directory.
-		if (vm["bindings"].defaulted())
-			bindings_path = Config.ncmpcpp_directory + "bindings";
-		else
-			expand_home(bindings_path);
-
 		// read bindings
-		if (Bindings.read(bindings_path) == false)
+		std::for_each(bindings_paths.begin(), bindings_paths.end(), expand_home);
+		if (Bindings.read(bindings_paths) == false)
 			exit(1);
 		Bindings.generateDefaults();
 
@@ -176,7 +212,16 @@ bool configure(int argc, char **argv)
 		if (env_host != nullptr)
 			Mpd.SetHostname(env_host);
 		if (env_port != nullptr)
-			Mpd.SetPort(boost::lexical_cast<int>(env_port));
+		{
+			auto trimmed_env_port = boost::trim_copy<std::string>(env_port);
+			try {
+				Mpd.SetPort(boost::lexical_cast<int>(trimmed_env_port));
+			} catch (boost::bad_lexical_cast &) {
+				throw std::runtime_error("MPD_PORT environment variable ("
+				                         + std::string(env_port)
+				                         + ") is not a number");
+			}
+		}
 
 		// if MPD connection details are provided as command line
 		// parameters, use them as their priority is the highest.
@@ -185,6 +230,19 @@ bool configure(int argc, char **argv)
 		if (!vm["port"].defaulted())
 			Mpd.SetPort(vm["port"].as<int>());
 		Mpd.SetTimeout(Config.mpd_connection_timeout);
+
+		// print current song
+		if (vm.count("current-song"))
+		{
+			Mpd.Connect();
+			auto s = Mpd.GetCurrentSong();
+			if (!s.empty())
+			{
+				auto format = Format::parse(vm["current-song"].as<std::string>(), Format::Flags::Tag);
+				std::cout << Format::stringify<char>(format, &s);
+			}
+			return false;
+		}
 
 		// custom startup screen
 		if (vm.count("screen"))

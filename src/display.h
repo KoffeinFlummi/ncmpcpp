@@ -1,5 +1,5 @@
 /***************************************************************************
- *   Copyright (C) 2008-2014 by Andrzej Rybczak                            *
+ *   Copyright (C) 2008-2017 by Andrzej Rybczak                            *
  *   electricityispower@gmail.com                                          *
  *                                                                         *
  *   This program is free software; you can redistribute it and/or modify  *
@@ -25,7 +25,7 @@
 #include "format.h"
 #include "menu.h"
 #include "mutable_song.h"
-#include "search_engine.h"
+#include "screens/search_engine.h"
 #include "song_list.h"
 
 namespace Display {

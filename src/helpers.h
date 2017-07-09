@@ -1,5 +1,5 @@
 /***************************************************************************
- *   Copyright (C) 2008-2014 by Andrzej Rybczak                            *
+ *   Copyright (C) 2008-2017 by Andrzej Rybczak                            *
  *   electricityispower@gmail.com                                          *
  *                                                                         *
  *   This program is free software; you can redistribute it and/or modify  *
@@ -23,7 +23,8 @@
 
 #include "interfaces.h"
 #include "mpdpp.h"
-#include "screen.h"
+#include "screens/playlist.h"
+#include "screens/screen.h"
 #include "settings.h"
 #include "song_list.h"
 #include "status.h"
@@ -31,10 +32,59 @@
 #include "utility/type_conversions.h"
 #include "utility/wide_string.h"
 
+enum ReapplyFilter { Yes, No };
+
+template <typename ItemT>
+struct ScopedUnfilteredMenu
+{
+	ScopedUnfilteredMenu(ReapplyFilter reapply_filter, NC::Menu<ItemT> &menu)
+		: m_refresh(false), m_reapply_filter(reapply_filter), m_menu(menu)
+	{
+		m_is_filtered = m_menu.isFiltered();
+		if (m_is_filtered)
+			m_menu.showAllItems();
+	}
+
+	~ScopedUnfilteredMenu()
+	{
+		if (m_is_filtered)
+		{
+			switch (m_reapply_filter)
+			{
+			case ReapplyFilter::Yes:
+				m_menu.reapplyFilter();
+				break;
+			case ReapplyFilter::No:
+				m_menu.showFilteredItems();
+				break;
+			}
+		}
+		if (m_refresh)
+			m_menu.refresh();
+	}
+
+	void set(ReapplyFilter reapply_filter, bool refresh)
+	{
+		m_reapply_filter = reapply_filter;
+		m_refresh = refresh;
+	}
+
+private:
+	bool m_is_filtered;
+	bool m_refresh;
+	ReapplyFilter m_reapply_filter;
+	NC::Menu<ItemT> &m_menu;
+};
+
 template <typename Iterator, typename PredicateT>
 Iterator wrappedSearch(Iterator begin, Iterator current, Iterator end,
                        const PredicateT &pred, bool wrap, bool skip_current)
 {
+	if (begin == end)
+	{
+		assert(current == end);
+		return begin;
+	}
 	if (skip_current)
 		++current;
 	auto it = std::find_if(current, end, pred);
@@ -49,7 +99,7 @@ Iterator wrappedSearch(Iterator begin, Iterator current, Iterator end,
 
 template <typename ItemT, typename PredicateT>
 bool search(NC::Menu<ItemT> &m, const PredicateT &pred,
-            SearchDirection direction, bool wrap, bool skip_current)
+                  SearchDirection direction, bool wrap, bool skip_current)
 {
 	bool result = false;
 	if (pred.defined())
@@ -84,16 +134,6 @@ bool search(NC::Menu<ItemT> &m, const PredicateT &pred,
 	return result;
 }
 
-inline HasColumns *hasColumns(BaseScreen *screen)
-{
-	return dynamic_cast<HasColumns *>(screen);
-}
-
-inline HasSongs *hasSongs(BaseScreen *screen)
-{
-	return dynamic_cast<HasSongs *>(screen);
-}
-
 template <typename Iterator>
 bool hasSelected(Iterator first, Iterator last)
 {
@@ -113,7 +153,9 @@ std::vector<Iterator> getSelected(Iterator first, Iterator last)
 	return result;
 }
 
-/// @return true if range that begins and ends with selected items was found
+/// @return true if range that begins and ends with selected items was
+/// found, false when there is no selected items (in which case first
+/// == last).
 template <typename Iterator>
 bool findRange(Iterator &first, Iterator &last)
 {
@@ -134,13 +176,24 @@ bool findRange(Iterator &first, Iterator &last)
 	return true;
 }
 
-/// @return true if fully selected range was found, false otherwise.
+/// @return true if fully selected range was found or no selected
+/// items were found, false otherwise.
 template <typename Iterator>
 bool findSelectedRange(Iterator &first, Iterator &last)
 {
+	auto orig_first = first;
 	if (!findRange(first, last))
-		return false;
-	// we have range, now check if it's filled with selected items
+	{
+		// If no selected items were found, return original range.
+		if (first == last)
+		{
+			first = orig_first;
+			return true;
+		}
+		else
+			return false;
+	}
+	// We have range, now check if it's filled with selected items.
 	for (auto it = first; it != last; ++it)
 	{
 		if (!it->isSelected())
@@ -237,18 +290,18 @@ void moveSelectedItemsDown(NC::Menu<MPD::Song> &m, F swap_fun)
 }
 
 template <typename F>
-void moveSelectedItemsTo(NC::Menu<MPD::Song> &m, F move_fun)
+void moveSelectedItemsTo(NC::Menu<MPD::Song> &menu, F &&move_fun)
 {
-	// FIXME: make it not look like shit
-	auto cur_ptr = &m.current()->value();
+	auto cur_ptr = &menu.current()->value();
+	ScopedUnfilteredMenu<MPD::Song> sunfilter(ReapplyFilter::No, menu);
 	// this is kinda shitty, but there is no other way to know
 	// what position current item has in unfiltered menu.
 	ptrdiff_t pos = 0;
-	for (auto it = m.begin(); it != m.end(); ++it, ++pos)
+	for (auto it = menu.begin(); it != menu.end(); ++it, ++pos)
 		if (&it->value() == cur_ptr)
 			break;
-	auto begin = m.begin();
-	auto list = getSelected(m.begin(), m.end());
+	auto begin = menu.begin();
+	auto list = getSelected(menu.begin(), menu.end());
 	// we move only truly selected items
 	if (list.empty())
 		return;
@@ -269,7 +322,7 @@ void moveSelectedItemsTo(NC::Menu<MPD::Song> &m, F move_fun)
 		for (auto it = list.rbegin(); it != list.rend(); ++it, --i)
 		{
 			(*it)->setSelected(false);
-			m[pos+i].setSelected(true);
+			menu[pos+i].setSelected(true);
 		}
 	}
 	else if (diff < 0) // move up
@@ -282,28 +335,43 @@ void moveSelectedItemsTo(NC::Menu<MPD::Song> &m, F move_fun)
 		for (auto it = list.begin(); it != list.end(); ++it, ++i)
 		{
 			(*it)->setSelected(false);
-			m[pos+i].setSelected(true);
+			menu[pos+i].setSelected(true);
 		}
 	}
 }
 
 template <typename F>
-void deleteSelectedSongs(NC::Menu<MPD::Song> &m, F delete_fun)
+void deleteSelectedSongs(NC::Menu<MPD::Song> &menu, F &&delete_fun)
 {
-	selectCurrentIfNoneSelected(m);
-	// ok, this is tricky. we need to operate on whole playlist
-	// to get positions right, but at the same time we need to
-	// ignore all songs that are not filtered. we use the fact
-	// that both ranges share the same values, ie. we can compare
-	// pointers to check whether an item belongs to filtered range.
-	auto begin = ++m.begin();
-	Mpd.StartCommandsList();
-	for (auto it = m.rbegin(); it != m.rend(); ++it)
+	selectCurrentIfNoneSelected(menu);
+	// We need to operate on the whole playlist to get positions right, but at the
+	// same time we need to ignore all songs that are not filtered. We abuse the
+	// fact that both ranges share the same values, i.e. we can compare addresses
+	// of item values to check whether an item belongs to filtered range. TODO: do
+	// something more sane here.
+	NC::Menu<MPD::Song>::Iterator begin;
+	NC::Menu<MPD::Song>::ReverseIterator real_begin, real_end;
 	{
-		if (it->isSelected())
+		ScopedUnfilteredMenu<MPD::Song> sunfilter(ReapplyFilter::No, menu);
+		// obtain iterators for unfiltered range
+		begin = menu.begin() + 1; // cancel reverse iterator's offset
+		real_begin = menu.rbegin();
+		real_end = menu.rend();
+	};
+	// get iterator to filtered range
+	auto cur_filtered = menu.rbegin();
+	Mpd.StartCommandsList();
+	for (auto it = real_begin; it != real_end; ++it)
+	{
+		// current iterator belongs to filtered range, proceed
+		if (&it->value() == &cur_filtered->value())
 		{
-			it->setSelected(false);
-			delete_fun(Mpd, it.base() - begin);
+			if (it->isSelected())
+			{
+				it->setSelected(false);
+				delete_fun(Mpd, it.base() - begin);
+			}
+			++cur_filtered;
 		}
 	}
 	Mpd.CommitCommandsList();
@@ -316,7 +384,8 @@ void cropPlaylist(NC::Menu<MPD::Song> &m, F delete_fun)
 	deleteSelectedSongs(m, delete_fun);
 }
 
-template <typename Iterator> std::string getSharedDirectory(Iterator first, Iterator last)
+template <typename Iterator>
+std::string getSharedDirectory(Iterator first, Iterator last)
 {
 	assert(first != last);
 	std::string result = first->getDirectory();
@@ -326,6 +395,56 @@ template <typename Iterator> std::string getSharedDirectory(Iterator first, Iter
 		if (result == "/")
 			break;
 	}
+	return result;
+}
+
+template <typename Iterator>
+bool addSongsToPlaylist(Iterator first, Iterator last, bool play, int position)
+{
+	bool result = true;
+	auto addSongNoError = [&](Iterator it) -> int {
+		try
+		{
+			return Mpd.AddSong(*it, position);
+		}
+		catch (MPD::ServerError &e)
+		{
+			Status::handleServerError(e);
+			result = false;
+			return -1;
+		}
+	};
+
+	if (last-first >= 1)
+	{
+		int id;
+		while (true)
+		{
+			id = addSongNoError(first);
+			if (id >= 0)
+				break;
+			++first;
+			if (first == last)
+				return result;
+		}
+
+		if (position == -1)
+		{
+			++first;
+			for(; first != last; ++first)
+				addSongNoError(first);
+		}
+		else
+		{
+			++position;
+			--last;
+			for (; first != last; --last)
+				addSongNoError(last);
+		}
+		if (play)
+			Mpd.PlayID(id);
+	}
+
 	return result;
 }
 
@@ -372,12 +491,36 @@ template <typename T> void ShowTime(T &buf, size_t length, bool short_names)
 		buf << length << (short_names ? "s" : (length == 1 ? " second" : " seconds"));
 }
 
-template <typename BufferT> void ShowTag(BufferT &buf, const std::string &tag)
+template <typename BufferT>
+void ShowTag(BufferT &buf, const std::string &tag)
 {
 	if (tag.empty())
-		buf << Config.empty_tags_color << Config.empty_tag << NC::Color::End;
+		buf << Config.empty_tags_color
+		    << Config.empty_tag
+		    << NC::FormattedColor::End<>(Config.empty_tags_color);
 	else
 		buf << tag;
+}
+
+inline NC::Buffer ShowTag(const std::string &tag)
+{
+	NC::Buffer result;
+	ShowTag(result, tag);
+	return result;
+}
+
+template <typename T>
+void setHighlightFixes(NC::Menu<T> &m)
+{
+	m.setHighlightPrefix(Config.current_item_prefix);
+	m.setHighlightSuffix(Config.current_item_suffix);
+}
+
+template <typename T>
+void setHighlightInactiveColumnFixes(NC::Menu<T> &m)
+{
+	m.setHighlightPrefix(Config.current_item_inactive_column_prefix);
+	m.setHighlightSuffix(Config.current_item_inactive_column_suffix);
 }
 
 inline const char *withErrors(bool success)
@@ -385,20 +528,15 @@ inline const char *withErrors(bool success)
 	return success ? "" : " " "(with errors)";
 }
 
-
-bool addSongsToPlaylist(std::vector<MPD::Song>::const_iterator first,
-                        std::vector<MPD::Song>::const_iterator last,
-                        bool play, int position);
-
 bool addSongToPlaylist(const MPD::Song &s, bool play, int position = -1);
 
 const MPD::Song *currentSong(const BaseScreen *screen);
 
+MPD::SongIterator getDatabaseIterator(MPD::Connection &mpd);
+
 std::string timeFormat(const char *format, time_t t);
 
 std::string Timestamp(time_t t);
-
-void markSongsInPlaylist(SongList &list);
 
 std::wstring Scroller(const std::wstring &str, size_t &pos, size_t width);
 void writeCyclicBuffer(const NC::WBuffer &buf, NC::Window &w, size_t &start_pos,

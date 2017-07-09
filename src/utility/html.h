@@ -1,5 +1,5 @@
 /***************************************************************************
- *   Copyright (C) 2008-2014 by Andrzej Rybczak                            *
+ *   Copyright (C) 2008-2017 by Andrzej Rybczak                            *
  *   electricityispower@gmail.com                                          *
  *                                                                         *
  *   This program is free software; you can redistribute it and/or modify  *
@@ -24,7 +24,7 @@
 #include <string>
 
 std::string unescapeHtmlUtf8(const std::string &s);
-
+void unescapeHtmlEntities(std::string &s);
 void stripHtmlTags(std::string &s);
 
 #endif // NCMPCPP_UTILITY_HTML_H

@@ -1,5 +1,5 @@
 /***************************************************************************
- *   Copyright (C) 2008-2014 by Andrzej Rybczak                            *
+ *   Copyright (C) 2008-2017 by Andrzej Rybczak                            *
  *   electricityispower@gmail.com                                          *
  *                                                                         *
  *   This program is free software; you can redistribute it and/or modify  *
@@ -64,7 +64,7 @@ struct OutOfBounds : std::exception
 			"value is out of bounds ((<-, %1%] expected, %2% given)") % ubound % value).str());
 	}
 	
-	virtual const char *what() const noexcept OVERRIDE { return m_error_message.c_str(); }
+	virtual const char *what() const noexcept override { return m_error_message.c_str(); }
 
 private:
 	OutOfBounds(std::string msg) : m_error_message(msg) { }

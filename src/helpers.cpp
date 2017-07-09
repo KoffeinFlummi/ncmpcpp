@@ -1,5 +1,5 @@
 /***************************************************************************
- *   Copyright (C) 2008-2014 by Andrzej Rybczak                            *
+ *   Copyright (C) 2008-2017 by Andrzej Rybczak                            *
  *   electricityispower@gmail.com                                          *
  *                                                                         *
  *   This program is free software; you can redistribute it and/or modify  *
@@ -19,11 +19,13 @@
  ***************************************************************************/
 
 #include <algorithm>
+#include <boost/range/adaptor/reversed.hpp>
 #include <time.h>
 
 #include "enums.h"
 #include "helpers.h"
-#include "playlist.h"
+#include "format_impl.h"
+#include "screens/playlist.h"
 #include "statusbar.h"
 #include "utility/functional.h"
 
@@ -35,65 +37,49 @@ const MPD::Song *currentSong(const BaseScreen *screen)
 	{
 		const auto it = list->currentS();
 		if (it != list->endS())
-			ptr = it->get<Bit::Song>();
+			ptr = it->song();
 	}
 	return ptr;
 }
 
-typedef std::vector<MPD::Song>::const_iterator VectorSongIterator;
-bool addSongsToPlaylist(VectorSongIterator first, VectorSongIterator last, bool play, int position)
+MPD::SongIterator getDatabaseIterator(MPD::Connection &mpd)
 {
-	bool result = true;
-	auto addSongNoError = [&](VectorSongIterator song) -> int {
-		try
-		{
-			return Mpd.AddSong(*song, position);
-		}
-		catch (MPD::ServerError &e)
-		{
-			Status::handleServerError(e);
-			result = false;
-			return -1;
-		}
-	};
-
-	if (last-first >= 1)
+	MPD::SongIterator result;
+	try
 	{
-		int id;
-		while (true)
+		result = mpd.GetDirectoryRecursive("/");
+	}
+	catch (MPD::ClientError &e)
+	{
+		if (e.code() == MPD_ERROR_CLOSED)
 		{
-			id = addSongNoError(first);
-			if (id >= 0)
-				break;
-			++first;
-			if (first == last)
-				return result;
-		}
-
-		if (position == -1)
-		{
-			++first;
-			for(; first != last; ++first)
-				addSongNoError(first);
+			// If we can't get the database, display appropriate
+			// error message and reconnect with the MPD server.
+			Statusbar::print("Unable to fetch the data, increase max_output_buffer_size in your MPD configuration file");
+			mpd.Disconnect();
+			mpd.Connect();
 		}
 		else
-		{
-			++position;
-			--last;
-			for (; first != last; --last)
-				addSongNoError(last);
-		}
-		if (play)
-			Mpd.PlayID(id);
+			throw;
 	}
-
+	catch (MPD::ServerError &e)
+	{
+		// mopidy blacklists 'listallinfo' command by default and throws server
+		// error when it receives it. Work around that to prevent ncmpcpp from
+		// continuously retrying to send the command and looping.
+		if (strstr(e.what(), "listallinfo") != nullptr
+		    && strstr(e.what(), "disabled") != nullptr)
+			Statusbar::print("Unable to fetch the data, server refused to process 'listallinfo' command");
+		else
+			throw;
+	}
 	return result;
 }
 
 void removeSongFromPlaylist(const SongMenu &playlist, const MPD::Song &s)
 {
 	Mpd.StartCommandsList();
-	for (auto &item : reverse_iteration(playlist))
+	for (auto &item : boost::adaptors::reverse(playlist))
 		if (item.value() == s)
 			Mpd.Delete(item.value().getPosition());
 	Mpd.CommitCommandsList();
@@ -149,17 +135,6 @@ std::string Timestamp(time_t t)
 	return result;
 }
 
-void markSongsInPlaylist(SongList &list)
-{
-	MPD::Song *s;
-	for (auto &p : list)
-	{
-		s = p.get<Bit::Song>();
-		if (s != nullptr)
-			p.get<Bit::Properties>().setBold(myPlaylist->checkForSong(*s));
-	}
-}
-
 std::wstring Scroller(const std::wstring &str, size_t &pos, size_t width)
 {
 	std::wstring s(str);
@@ -205,21 +180,21 @@ void writeCyclicBuffer(const NC::WBuffer &buf, NC::Window &w, size_t &start_pos,
 		auto p = ps.begin();
 		
 		// load attributes from before starting pos
-		for (; p != ps.end() && p->position() < start_pos; ++p)
-			w << *p;
+		for (; p != ps.end() && p->first < start_pos; ++p)
+			w << p->second;
 		
 		auto write_buffer = [&](size_t start) {
 			for (size_t i = start; i < s.length() && len < width; ++i)
 			{
-				for (; p != ps.end() && p->position() == i; ++p)
-					w << *p;
+				for (; p != ps.end() && p->first == i; ++p)
+					w << p->second;
 				len += wcwidth(s[i]);
 				if (len > width)
 					break;
 				w << s[i];
 			}
 			for (; p != ps.end(); ++p)
-				w << *p;
+				w << p->second;
 			p = ps.begin();
 		};
 		
